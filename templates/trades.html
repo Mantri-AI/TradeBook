@@ -7,6 +7,9 @@
     <h1 class="h2"><i class="fas fa-exchange-alt me-2"></i>Trading History</h1>
     <div class="btn-toolbar mb-2 mb-md-0">
         <div class="btn-group me-2">
+            <button type="button" class="btn btn-sm btn-primary" onclick="showAddTradeModal()">
+                <i class="fas fa-plus me-1"></i>Add Trade
+            </button>
             <button type="button" class="btn btn-sm btn-outline-secondary" onclick="refreshTrades()">
                 <i class="fas fa-sync-alt me-1"></i>Refresh
             </button>
@@ -145,7 +148,7 @@
                             <th onclick="sortTable('price')">Price <i class="fas fa-sort"></i></th>
                             <th onclick="sortTable('amount')">Total Amount <i class="fas fa-sort"></i></th>
                             <th onclick="sortTable('source')">Source <i class="fas fa-sort"></i></th>
-                            <th>Details</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -208,9 +211,19 @@
                                 </span>
                             </td>
                             <td>
-                                <button class="btn btn-sm btn-outline-info" onclick="viewTradeDetails({{ trade.id }})">
-                                    <i class="fas fa-info-circle"></i>
-                                </button>
+                                <div class="btn-group" role="group">
+                                    <button class="btn btn-sm btn-outline-info" onclick="viewTradeDetails({{ trade.id }})" title="View Details">
+                                        <i class="fas fa-info-circle"></i>
+                                    </button>
+                                    {% if trade.import_source in ['manual', 'csv_import'] %}
+                                    <button class="btn btn-sm btn-outline-warning" onclick="editTrade({{ trade.id }})" title="Edit Trade">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteTrade({{ trade.id }})" title="Delete Trade">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                    {% endif %}
+                                </div>
                             </td>
                         </tr>
                         {% endfor %}
@@ -297,6 +310,187 @@
             </div>
             <div class="modal-body" id="tradeDetailsContent">
                 <!-- Content will be loaded dynamically -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Trade Modal -->
+<div class="modal fade" id="addEditTradeModal" tabindex="-1" aria-labelledby="addEditTradeModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="addEditTradeModalLabel">
+                    <i class="fas fa-plus me-2"></i>Add New Trade
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="tradeForm">
+                    <input type="hidden" id="tradeId" name="trade_id">
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="tradeAccount" class="form-label">Account *</label>
+                                <select class="form-select" id="tradeAccount" name="account_id" required>
+                                    <option value="">Select Account</option>
+                                    {% for account in accounts %}
+                                        <option value="{{ account.id }}">{{ account.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="tradeSymbol" class="form-label">Symbol *</label>
+                                <input type="text" class="form-control" id="tradeSymbol" name="symbol" required placeholder="AAPL" style="text-transform: uppercase;">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="tradeSide" class="form-label">Side *</label>
+                                <select class="form-select" id="tradeSide" name="side" required>
+                                    <option value="">Select Side</option>
+                                    <option value="buy">Buy</option>
+                                    <option value="sell">Sell</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="tradeTransCode" class="form-label">Transaction Code *</label>
+                                <select class="form-select" id="tradeTransCode" name="trans_code" required>
+                                    <option value="">Select Code</option>
+                                    <option value="BTO">BTO - Buy To Open</option>
+                                    <option value="STO">STO - Sell To Open</option>
+                                    <option value="BTC">BTC - Buy To Close</option>
+                                    <option value="STC">STC - Sell To Close</option>
+                                    <option value="DIV">DIV - Dividend</option>
+                                    <option value="SPLIT">SPLIT - Stock Split</option>
+                                    <option value="OTHER">OTHER - Other</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="tradeType" class="form-label">Instrument Type *</label>
+                                <select class="form-select" id="tradeType" name="instrument_type" onchange="toggleOptionsFields()">
+                                    <option value="stock">Stock</option>
+                                    <option value="option">Option</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="tradeDescription" class="form-label">Description</label>
+                                <input type="text" class="form-control" id="tradeDescription" name="description" placeholder="Optional description">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="tradeQuantity" class="form-label">Quantity *</label>
+                                <input type="number" class="form-control" id="tradeQuantity" name="quantity" step="0.01" required placeholder="100">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="tradePrice" class="form-label">Price *</label>
+                                <input type="number" class="form-control" id="tradePrice" name="price" step="0.0001" required placeholder="150.25">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="tradeFees" class="form-label">Fees</label>
+                                <input type="number" class="form-control" id="tradeFees" name="fees" step="0.01" placeholder="0.00">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Options-specific fields -->
+                    <div id="optionsFields" style="display: none;">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="tradeOptionType" class="form-label">Option Type</label>
+                                    <select class="form-select" id="tradeOptionType" name="option_type">
+                                        <option value="">Select Type</option>
+                                        <option value="call">Call</option>
+                                        <option value="put">Put</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="tradeStrikePrice" class="form-label">Strike Price</label>
+                                    <input type="number" class="form-control" id="tradeStrikePrice" name="strike_price" step="0.01" placeholder="150.00">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="tradeExpirationDate" class="form-label">Expiration Date</label>
+                                    <input type="date" class="form-control" id="tradeExpirationDate" name="expiration_date">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="tradeActivityDate" class="form-label">Activity Date *</label>
+                                <input type="date" class="form-control" id="tradeActivityDate" name="activity_date" required>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="tradeExecutedDate" class="form-label">Executed Date</label>
+                                <input type="date" class="form-control" id="tradeExecutedDate" name="executed_at">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="tradeExecutedTime" class="form-label">Executed Time</label>
+                                <input type="time" class="form-control" id="tradeExecutedTime" name="executed_time">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="tradeProcessDate" class="form-label">Process Date</label>
+                                <input type="date" class="form-control" id="tradeProcessDate" name="process_date">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="tradeSettleDate" class="form-label">Settle Date</label>
+                                <input type="date" class="form-control" id="tradeSettleDate" name="settle_date">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <small>Fields marked with * are required. The total amount will be calculated automatically (Quantity × Price).</small>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveTrade()">
+                    <i class="fas fa-save me-1"></i>Save Trade
+                </button>
             </div>
         </div>
     </div>
@@ -682,6 +876,171 @@
         }
         
         window.open(url, '_blank');
+    }
+
+    // Add/Edit Trade Functions
+    function showAddTradeModal() {
+        $('#addEditTradeModalLabel').html('<i class="fas fa-plus me-2"></i>Add New Trade');
+        $('#tradeForm')[0].reset();
+        $('#tradeId').val('');
+        
+        // Set default values
+        const today = new Date().toISOString().split('T')[0];
+        $('#tradeActivityDate').val(today);
+        $('#tradeExecutedDate').val(today);
+        
+        // Hide options fields by default
+        toggleOptionsFields();
+        
+        $('#addEditTradeModal').modal('show');
+    }
+
+    function editTrade(tradeId) {
+        $('#addEditTradeModalLabel').html('<i class="fas fa-edit me-2"></i>Edit Trade');
+        
+        // Fetch trade details and populate form
+        fetch(`/api/trades/${tradeId}`)
+            .then(response => response.json())
+            .then(trade => {
+                $('#tradeId').val(trade.id);
+                $('#tradeAccount').val(trade.account_id);
+                $('#tradeSymbol').val(trade.symbol);
+                $('#tradeSide').val(trade.side);
+                $('#tradeTransCode').val(trade.trans_code);
+                $('#tradeType').val(trade.instrument_type);
+                $('#tradeDescription').val(trade.description || '');
+                $('#tradeQuantity').val(trade.quantity);
+                $('#tradePrice').val(trade.price);
+                $('#tradeFees').val(trade.fees || 0);
+                
+                // Handle dates
+                if (trade.activity_date) {
+                    $('#tradeActivityDate').val(trade.activity_date);
+                }
+                if (trade.executed_at) {
+                    const executedDate = new Date(trade.executed_at);
+                    $('#tradeExecutedDate').val(executedDate.toISOString().split('T')[0]);
+                    
+                    // Extract time if available
+                    const timeStr = executedDate.toTimeString().substring(0, 5);
+                    if (timeStr !== '00:00') {
+                        $('#tradeExecutedTime').val(timeStr);
+                    }
+                }
+                if (trade.process_date) {
+                    $('#tradeProcessDate').val(trade.process_date);
+                }
+                if (trade.settle_date) {
+                    $('#tradeSettleDate').val(trade.settle_date);
+                }
+                
+                // Handle options fields
+                if (trade.instrument_type === 'option') {
+                    $('#tradeOptionType').val(trade.option_type || '');
+                    $('#tradeStrikePrice').val(trade.strike_price || '');
+                    if (trade.expiration_date) {
+                        $('#tradeExpirationDate').val(trade.expiration_date);
+                    }
+                }
+                
+                toggleOptionsFields();
+                $('#addEditTradeModal').modal('show');
+            })
+            .catch(error => {
+                console.error('Error fetching trade details:', error);
+                showError('Failed to load trade details');
+            });
+    }
+
+    function toggleOptionsFields() {
+        const instrumentType = $('#tradeType').val();
+        if (instrumentType === 'option') {
+            $('#optionsFields').show();
+        } else {
+            $('#optionsFields').hide();
+            // Clear options fields when switching to stock
+            $('#tradeOptionType').val('');
+            $('#tradeStrikePrice').val('');
+            $('#tradeExpirationDate').val('');
+        }
+    }
+
+    function saveTrade() {
+        const form = $('#tradeForm')[0];
+        if (!form.checkValidity()) {
+            form.reportValidity();
+            return;
+        }
+        
+        const tradeId = $('#tradeId').val();
+        const formData = new FormData(form);
+        const data = {};
+        
+        for (let [key, value] of formData.entries()) {
+            if (value !== '') {
+                data[key] = value;
+            }
+        }
+        
+        // Show loading
+        showLoading();
+        
+        const url = tradeId ? `/api/trades/${tradeId}` : '/api/trades';
+        const method = tradeId ? 'PUT' : 'POST';
+        
+        fetch(url, {
+            method: method,
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data)
+        })
+        .then(response => response.json())
+        .then(result => {
+            hideLoading();
+            if (result.success) {
+                showSuccess(result.message);
+                $('#addEditTradeModal').modal('hide');
+                
+                // Refresh the page to show updated data
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showError(result.message || 'Failed to save trade');
+            }
+        })
+        .catch(error => {
+            hideLoading();
+            console.error('Error saving trade:', error);
+            showError('Network error occurred');
+        });
+    }
+
+    function deleteTrade(tradeId) {
+        if (!confirm('Are you sure you want to delete this trade? This action cannot be undone.')) {
+            return;
+        }
+        
+        showLoading();
+        
+        fetch(`/api/trades/${tradeId}`, {
+            method: 'DELETE'
+        })
+        .then(response => response.json())
+        .then(result => {
+            hideLoading();
+            if (result.success) {
+                showSuccess(result.message);
+                // Refresh the page to show updated data
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showError(result.message || 'Failed to delete trade');
+            }
+        })
+        .catch(error => {
+            hideLoading();
+            console.error('Error deleting trade:', error);
+            showError('Network error occurred');
+        });
     }
 </script>
 {% endblock %}

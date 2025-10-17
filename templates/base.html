@@ -377,11 +377,13 @@
         }
 
         function showLoading() {
-            $('#loadingModal').modal('show');
+            //alert('loading');
+            //$('#loadingModal').modal('show');
         }
 
         function hideLoading() {
-            $('#loadingModal').modal('hide');
+            //alert('hiding');
+            //$('#loadingModal').modal('hide');
         }
 
         function formatCurrency(value) {
@@ -402,23 +404,43 @@
         }
 
         function showError(message) {
+            const alertId = 'alert-' + Date.now();
             const alert = `
-                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <div id="${alertId}" class="alert alert-danger alert-dismissible fade show" role="alert">
                     ${message}
                     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                 </div>
             `;
             $('.main-content .pt-3').prepend(alert);
+            
+            // Auto-dismiss after 10 seconds
+            setTimeout(function() {
+                const alertElement = document.getElementById(alertId);
+                if (alertElement) {
+                    const bsAlert = new bootstrap.Alert(alertElement);
+                    bsAlert.close();
+                }
+            }, 10000);
         }
 
         function showSuccess(message) {
+            const alertId = 'alert-' + Date.now();
             const alert = `
-                <div class="alert alert-success alert-dismissible fade show" role="alert">
+                <div id="${alertId}" class="alert alert-success alert-dismissible fade show" role="alert">
                     ${message}
                     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                 </div>
             `;
             $('.main-content .pt-3').prepend(alert);
+            
+            // Auto-dismiss after 10 seconds
+            setTimeout(function() {
+                const alertElement = document.getElementById(alertId);
+                if (alertElement) {
+                    const bsAlert = new bootstrap.Alert(alertElement);
+                    bsAlert.close();
+                }
+            }, 10000);
         }
 
         function syncAllAccounts() {

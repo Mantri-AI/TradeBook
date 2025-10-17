@@ -529,6 +529,161 @@ def api_trade_detail(trade_id):
     
     return jsonify(trade_dict)
 
+@app.route('/api/trades', methods=['POST'])
+def api_create_trade():
+    """Create a new trade manually"""
+    try:
+        data = request.get_json()
+        
+        # Validate required fields
+        required_fields = ['account_id', 'symbol', 'side', 'quantity', 'price', 'activity_date', 'trans_code']
+        for field in required_fields:
+            if field not in data or not data[field]:
+                return jsonify({'success': False, 'message': f'{field} is required'}), 400
+        
+        # Validate account exists
+        account = Account.query.get(data['account_id'])
+        if not account:
+            return jsonify({'success': False, 'message': 'Invalid account ID'}), 400
+        
+        # Parse dates
+        from datetime import datetime
+        try:
+            activity_date = datetime.strptime(data['activity_date'], '%Y-%m-%d').date()
+            executed_at = datetime.strptime(data.get('executed_at', data['activity_date']), '%Y-%m-%d')
+            if 'executed_time' in data and data['executed_time']:
+                time_part = datetime.strptime(data['executed_time'], '%H:%M').time()
+                executed_at = datetime.combine(executed_at.date(), time_part)
+        except ValueError as e:
+            return jsonify({'success': False, 'message': f'Invalid date format: {str(e)}'}), 400
+        
+        # Create trade object
+        trade = Trade(
+            account_id=data['account_id'],
+            symbol=data['symbol'].upper(),
+            instrument_type=data.get('instrument_type', 'stock'),
+            side=data['side'],
+            quantity=float(data['quantity']),
+            price=float(data['price']),
+            total_amount=float(data['quantity']) * float(data['price']),
+            activity_date=activity_date,
+            executed_at=executed_at,
+            trans_code=data['trans_code'],
+            description=data.get('description', ''),
+            fees=float(data.get('fees', 0)),
+            import_source='manual'
+        )
+        
+        # Handle options specific fields
+        if data.get('instrument_type') == 'option':
+            trade.option_type = data.get('option_type')
+            if data.get('strike_price'):
+                trade.strike_price = float(data['strike_price'])
+            if data.get('expiration_date'):
+                trade.expiration_date = datetime.strptime(data['expiration_date'], '%Y-%m-%d').date()
+        
+        # Handle process and settle dates if provided
+        if data.get('process_date'):
+            trade.process_date = datetime.strptime(data['process_date'], '%Y-%m-%d').date()
+        if data.get('settle_date'):
+            trade.settle_date = datetime.strptime(data['settle_date'], '%Y-%m-%d').date()
+        
+        # Save to database
+        db.session.add(trade)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True, 
+            'message': 'Trade created successfully',
+            'trade': trade.to_dict()
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error creating trade: {str(e)}")
+        return jsonify({'success': False, 'message': f'Error creating trade: {str(e)}'}), 500
+
+@app.route('/api/trades/<int:trade_id>', methods=['PUT'])
+def api_update_trade(trade_id):
+    """Update an existing trade"""
+    try:
+        trade = Trade.query.get_or_404(trade_id)
+        data = request.get_json()
+        
+        # Update fields if provided
+        if 'symbol' in data:
+            trade.symbol = data['symbol'].upper()
+        if 'side' in data:
+            trade.side = data['side']
+        if 'quantity' in data:
+            trade.quantity = float(data['quantity'])
+        if 'price' in data:
+            trade.price = float(data['price'])
+        if 'trans_code' in data:
+            trade.trans_code = data['trans_code']
+        if 'description' in data:
+            trade.description = data['description']
+        if 'fees' in data:
+            trade.fees = float(data['fees'])
+        if 'instrument_type' in data:
+            trade.instrument_type = data['instrument_type']
+        
+        # Recalculate total amount
+        if 'quantity' in data or 'price' in data:
+            trade.total_amount = trade.quantity * trade.price
+        
+        # Handle dates
+        if 'activity_date' in data:
+            trade.activity_date = datetime.strptime(data['activity_date'], '%Y-%m-%d').date()
+        if 'executed_at' in data:
+            trade.executed_at = datetime.strptime(data['executed_at'], '%Y-%m-%d')
+            if 'executed_time' in data and data['executed_time']:
+                time_part = datetime.strptime(data['executed_time'], '%H:%M').time()
+                trade.executed_at = datetime.combine(trade.executed_at.date(), time_part)
+        
+        # Handle options specific fields
+        if trade.instrument_type == 'option':
+            if 'option_type' in data:
+                trade.option_type = data['option_type']
+            if 'strike_price' in data:
+                trade.strike_price = float(data['strike_price']) if data['strike_price'] else None
+            if 'expiration_date' in data:
+                trade.expiration_date = datetime.strptime(data['expiration_date'], '%Y-%m-%d').date() if data['expiration_date'] else None
+        
+        # Save changes
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Trade updated successfully',
+            'trade': trade.to_dict()
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating trade: {str(e)}")
+        return jsonify({'success': False, 'message': f'Error updating trade: {str(e)}'}), 500
+
+@app.route('/api/trades/<int:trade_id>', methods=['DELETE'])
+def api_delete_trade(trade_id):
+    """Delete a trade"""
+    try:
+        trade = Trade.query.get_or_404(trade_id)
+        
+        # Only allow deletion of manually created trades for safety
+        if trade.import_source not in ['manual', 'csv_import']:
+            return jsonify({'success': False, 'message': 'Cannot delete API-synced trades'}), 400
+        
+        db.session.delete(trade)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': 'Trade deleted successfully'})
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error deleting trade: {str(e)}")
+        return jsonify({'success': False, 'message': f'Error deleting trade: {str(e)}'}), 500
+
 @app.route('/api/positions/top')
 def api_positions_top():
     """Get top positions by value"""
