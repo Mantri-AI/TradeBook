@@ -1,0 +1,484 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Mantri Trade Book{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2"><i class="fas fa-tachometer-alt me-2"></i>Portfolio Dashboard</h1>
+    <div class="btn-toolbar mb-2 mb-md-0">
+        <div class="btn-group me-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="refreshData()">
+                <i class="fas fa-sync-alt me-1"></i>Refresh
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="exportPortfolio()">
+                <i class="fas fa-download me-1"></i>Export
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Portfolio Overview Cards -->
+<div class="stats-grid">
+    <div class="card metric-card">
+        <div class="card-body">
+            <div class="metric-label">Total Portfolio Value</div>
+            <div class="metric-value" id="totalValue">{{ "${:,.2f}".format(data.total_portfolio_value or 0) }}</div>
+            <div class="small text-muted">
+                <span id="dayChange" class="{{ 'positive' if (data.total_day_change or 0) >= 0 else 'negative' }}">
+                    {{ "${:+,.2f}".format(data.total_day_change or 0) }} ({{ "{:+.2f}%".format(data.day_change_percent or 0) }})
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <div class="card metric-card">
+        <div class="card-body">
+            <div class="metric-label">Active Accounts</div>
+            <div class="metric-value text-info">{{ data.total_accounts or 0 }}</div>
+            <div class="small text-muted">Connected</div>
+        </div>
+    </div>
+
+    <div class="card metric-card">
+        <div class="card-body">
+            <div class="metric-label">Total Positions</div>
+            <div class="metric-value text-warning">{{ data.total_positions or 0 }}</div>
+            <div class="small text-muted">Holdings</div>
+        </div>
+    </div>
+
+    <div class="card metric-card">
+        <div class="card-body">
+            <div class="metric-label">Today's P&L</div>
+            <div class="metric-value {{ 'positive' if (data.total_day_change or 0) >= 0 else 'negative' }}">
+                {{ "${:+,.2f}".format(data.total_day_change or 0) }}
+            </div>
+            <div class="small text-muted">Daily Change</div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Section -->
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-chart-pie me-2"></i>Portfolio Allocation
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <canvas id="portfolioChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-chart-line me-2"></i>Performance Metrics
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <canvas id="performanceChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Account Overview -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-users me-2"></i>Account Overview
+                </h5>
+                <button class="btn btn-sm btn-primary" onclick="location.href='{{ url_for('accounts') }}'">
+                    Manage Accounts
+                </button>
+            </div>
+            <div class="card-body">
+                {% if accounts %}
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Account Name</th>
+                                    <th>Username</th>
+                                    <th>Positions</th>
+                                    <th>Portfolio Value</th>
+                                    <th>Day Change</th>
+                                    <th>Last Sync</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="accountsTable">
+                                {% for account in accounts %}
+                                <tr>
+                                    <td>
+                                        <strong>{{ account.name }}</strong>
+                                        {% if not account.is_active %}
+                                            <span class="badge bg-warning ms-2">Inactive</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ account.username }}</td>
+                                    <td>{{ account.positions.count() }}</td>
+                                    <td>{{ "${:,.2f}".format(account.total_portfolio_value or 0) }}</td>
+                                    <td>
+                                        <span class="badge bg-{{ 'success' if (account.total_portfolio_value or 0) >= 0 else 'danger' }}">
+                                            {{ "${:+,.2f}".format(0) }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        {% if account.last_sync %}
+                                            {{ account.last_sync.strftime('%m/%d/%Y %H:%M') }}
+                                        {% else %}
+                                            <span class="text-muted">Never</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <div class="btn-group btn-group-sm">
+                                            <button class="btn btn-outline-primary" onclick="syncAccount({{ account.id }})" title="Sync Account">
+                                                <i class="fas fa-sync-alt"></i>
+                                            </button>
+                                            <button class="btn btn-outline-info" onclick="viewPositions({{ account.id }})" title="View Positions">
+                                                <i class="fas fa-eye"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <div class="text-center py-5">
+                        <i class="fas fa-user-plus fa-3x text-muted mb-3"></i>
+                        <h5>No Accounts Connected</h5>
+                        <p class="text-muted">Connect your first Robinhood account to get started</p>
+                        <button class="btn btn-primary" onclick="location.href='{{ url_for('accounts') }}'">
+                            <i class="fas fa-plus me-2"></i>Add Account
+                        </button>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Activity -->
+<div class="row mt-4">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-clock me-2"></i>Recent Trades
+                </h5>
+            </div>
+            <div class="card-body">
+                <div id="recentTrades">
+                    <div class="text-center py-3">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                        <span class="ms-2">Loading recent trades...</span>
+                    </div>
+                </div>
+                <div class="text-center mt-3">
+                    <a href="{{ url_for('trades') }}" class="btn btn-sm btn-outline-primary">View All Trades</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-chart-area me-2"></i>Top Positions
+                </h5>
+            </div>
+            <div class="card-body">
+                <div id="topPositions">
+                    <div class="text-center py-3">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                        <span class="ms-2">Loading top positions...</span>
+                    </div>
+                </div>
+                <div class="text-center mt-3">
+                    <a href="{{ url_for('positions') }}" class="btn btn-sm btn-outline-primary">View All Positions</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let portfolioChart, performanceChart;
+
+    $(document).ready(function() {
+        initializeCharts();
+        loadRecentActivity();
+        
+        // Auto-refresh every 30 seconds
+        setInterval(refreshData, 30000);
+    });
+
+    function initializeCharts() {
+        // Portfolio Allocation Chart
+        const portfolioCtx = document.getElementById('portfolioChart').getContext('2d');
+        portfolioChart = new Chart(portfolioCtx, {
+            type: 'doughnut',
+            data: {
+                labels: [],
+                datasets: [{
+                    data: [],
+                    backgroundColor: [
+                        '#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6',
+                        '#1abc9c', '#34495e', '#e67e22', '#95a5a6', '#d35400'
+                    ],
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            boxWidth: 12,
+                            padding: 15
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.parsed;
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = ((value / total) * 100).toFixed(1);
+                                return context.label + ': ' + formatCurrency(value) + ' (' + percentage + '%)';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Performance Chart
+        const performanceCtx = document.getElementById('performanceChart').getContext('2d');
+        performanceChart = new Chart(performanceCtx, {
+            type: 'bar',
+            data: {
+                labels: ['Stocks', 'Options'],
+                datasets: [{
+                    label: 'Value',
+                    data: [0, 0],
+                    backgroundColor: ['#3498db', '#e74c3c'],
+                    borderColor: ['#2980b9', '#c0392b'],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return formatCurrency(value);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        loadPortfolioData();
+    }
+
+    function loadPortfolioData() {
+        fetch('/api/portfolio/summary')
+            .then(response => response.json())
+            .then(data => {
+                updatePortfolioChart(data);
+            })
+            .catch(error => {
+                console.error('Error loading portfolio data:', error);
+            });
+    }
+
+    function updatePortfolioChart(data) {
+        if (data.portfolio_data && data.portfolio_data.length > 0) {
+            const symbols = data.portfolio_data.map(item => item.symbol);
+            const values = data.portfolio_data.map(item => item.total_value);
+            
+            portfolioChart.data.labels = symbols.slice(0, 10); // Top 10
+            portfolioChart.data.datasets[0].data = values.slice(0, 10);
+            portfolioChart.update();
+        }
+
+        // Update performance chart
+        const stockValue = data.portfolio_data
+            .filter(item => item.positions.some(p => p.type === 'stock'))
+            .reduce((sum, item) => sum + item.total_value, 0);
+        
+        const optionValue = data.portfolio_data
+            .filter(item => item.positions.some(p => p.type === 'option'))
+            .reduce((sum, item) => sum + item.total_value, 0);
+
+        performanceChart.data.datasets[0].data = [stockValue, optionValue];
+        performanceChart.update();
+    }
+
+    function loadRecentActivity() {
+        // Load recent trades
+        fetch('/api/trades/recent?limit=5')
+            .then(response => response.json())
+            .then(data => {
+                displayRecentTrades(data.trades || []);
+            })
+            .catch(error => {
+                console.error('Error loading recent trades:', error);
+                $('#recentTrades').html('<div class="text-center text-muted">Failed to load recent trades</div>');
+            });
+
+        // Load top positions
+        fetch('/api/positions/top?limit=5')
+            .then(response => response.json())
+            .then(data => {
+                displayTopPositions(data.positions || []);
+            })
+            .catch(error => {
+                console.error('Error loading top positions:', error);
+                $('#topPositions').html('<div class="text-center text-muted">Failed to load top positions</div>');
+            });
+    }
+
+    function displayRecentTrades(trades) {
+        if (trades.length === 0) {
+            $('#recentTrades').html('<div class="text-center text-muted">No recent trades</div>');
+            return;
+        }
+
+        let html = '<div class="list-group list-group-flush">';
+        trades.forEach(trade => {
+            const sideClass = trade.side === 'buy' ? 'success' : 'danger';
+            const sideIcon = trade.side === 'buy' ? 'arrow-up' : 'arrow-down';
+            
+            html += `
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>${trade.symbol}</strong>
+                        <span class="badge bg-${sideClass} ms-2">
+                            <i class="fas fa-${sideIcon} me-1"></i>${trade.side.toUpperCase()}
+                        </span>
+                        <div class="small text-muted">${trade.quantity} shares @ ${formatCurrency(trade.price)}</div>
+                    </div>
+                    <div class="text-end">
+                        <div class="fw-bold">${formatCurrency(trade.total_amount)}</div>
+                        <div class="small text-muted">${new Date(trade.executed_at).toLocaleDateString()}</div>
+                    </div>
+                </div>
+            `;
+        });
+        html += '</div>';
+        
+        $('#recentTrades').html(html);
+    }
+
+    function displayTopPositions(positions) {
+        if (positions.length === 0) {
+            $('#topPositions').html('<div class="text-center text-muted">No positions</div>');
+            return;
+        }
+
+        let html = '<div class="list-group list-group-flush">';
+        positions.forEach(position => {
+            const changeClass = (position.day_change || 0) >= 0 ? 'success' : 'danger';
+            const changeIcon = (position.day_change || 0) >= 0 ? 'arrow-up' : 'arrow-down';
+            
+            html += `
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>${position.symbol}</strong>
+                        <span class="badge bg-secondary ms-2">${position.instrument_type.toUpperCase()}</span>
+                        <div class="small text-muted">${position.quantity} shares</div>
+                    </div>
+                    <div class="text-end">
+                        <div class="fw-bold">${formatCurrency(position.current_value)}</div>
+                        <div class="small text-${changeClass}">
+                            <i class="fas fa-${changeIcon} me-1"></i>${formatCurrency(position.day_change)}
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        html += '</div>';
+        
+        $('#topPositions').html(html);
+    }
+
+    function refreshData() {
+        loadPortfolioData();
+        loadRecentActivity();
+        
+        // Refresh account data
+        $('#accountsTable tr').each(function(index) {
+            if (index > 0) { // Skip header
+                $(this).find('td:last-child .btn-outline-primary').addClass('disabled');
+            }
+        });
+        
+        showSuccess('Data refreshed successfully');
+        
+        setTimeout(() => {
+            $('#accountsTable tr').each(function(index) {
+                if (index > 0) {
+                    $(this).find('td:last-child .btn-outline-primary').removeClass('disabled');
+                }
+            });
+        }, 2000);
+    }
+
+    function syncAccount(accountId) {
+        showLoading();
+        fetch(`/api/sync/${accountId}`, { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                hideLoading();
+                if (data.success) {
+                    showSuccess(`Account synced successfully`);
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    showError(data.message || 'Sync failed');
+                }
+            })
+            .catch(error => {
+                hideLoading();
+                showError('Network error occurred');
+                console.error('Error:', error);
+            });
+    }
+
+    function viewPositions(accountId) {
+        window.location.href = `{{ url_for('positions') }}?account_id=${accountId}`;
+    }
+
+    function exportPortfolio() {
+        showSuccess('Export feature coming soon!');
+    }
+</script>
+{% endblock %}

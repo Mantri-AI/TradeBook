@@ -1,0 +1,654 @@
+{% extends "base.html" %}
+
+{% block title %}Trading History - Mantri Trade Book{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2"><i class="fas fa-exchange-alt me-2"></i>Trading History</h1>
+    <div class="btn-toolbar mb-2 mb-md-0">
+        <div class="btn-group me-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="refreshTrades()">
+                <i class="fas fa-sync-alt me-1"></i>Refresh
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="exportTrades()">
+                <i class="fas fa-download me-1"></i>Export
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Filters Section -->
+<div class="filter-section">
+    <div class="row">
+        <div class="col-md-3">
+            <label for="accountFilter" class="form-label">Account</label>
+            <select class="form-select" id="accountFilter" onchange="applyFilters()">
+                <option value="">All Accounts</option>
+                {% for account in accounts %}
+                    <option value="{{ account.id }}" {% if selected_account == account.id|string %}selected{% endif %}>
+                        {{ account.name }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label for="timeRange" class="form-label">Time Range</label>
+            <select class="form-select" id="timeRange" onchange="applyFilters()">
+                <option value="7" {% if days == 7 %}selected{% endif %}>Last 7 Days</option>
+                <option value="30" {% if days == 30 %}selected{% endif %}>Last 30 Days</option>
+                <option value="90" {% if days == 90 %}selected{% endif %}>Last 90 Days</option>
+                <option value="365" {% if days == 365 %}selected{% endif %}>Last Year</option>
+                <option value="all">All Time</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label for="sideFilter" class="form-label">Side</label>
+            <select class="form-select" id="sideFilter" onchange="applyFilters()">
+                <option value="">All</option>
+                <option value="buy">Buy Only</option>
+                <option value="sell">Sell Only</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label for="searchSymbol" class="form-label">Search Symbol</label>
+            <input type="text" class="form-control search-box" id="searchSymbol" 
+                   placeholder="AAPL, TSLA, etc." value="{{ search }}" onkeyup="filterBySymbol()">
+        </div>
+        <div class="col-md-2">
+            <label for="sortBy" class="form-label">Sort By</label>
+            <select class="form-select" id="sortBy" onchange="sortTrades()">
+                <option value="date">Date (Latest)</option>
+                <option value="symbol">Symbol</option>
+                <option value="amount">Amount</option>
+                <option value="quantity">Quantity</option>
+            </select>
+        </div>
+    </div>
+</div>
+
+<!-- Trading Summary Cards -->
+<div class="stats-grid mb-4">
+    <div class="card metric-card">
+        <div class="card-body">
+            <div class="metric-label">Total Trades</div>
+            <div class="metric-value text-primary" id="totalTrades">{{ trades|length }}</div>
+            <div class="small text-muted">Executed</div>
+        </div>
+    </div>
+    <div class="card metric-card">
+        <div class="card-body">
+            <div class="metric-label">Total Volume</div>
+            <div class="metric-value" id="totalVolume">
+                {{ "${:,.2f}".format(trades|sum(attribute='total_amount') or 0) }}
+            </div>
+            <div class="small text-muted">Traded Value</div>
+        </div>
+    </div>
+    <div class="card metric-card">
+        <div class="card-body">
+            <div class="metric-label">Buy Trades</div>
+            <div class="metric-value text-success" id="buyTrades">
+                {{ trades|selectattr('side', 'equalto', 'buy')|list|length }}
+            </div>
+            <div class="small text-muted">Purchases</div>
+        </div>
+    </div>
+    <div class="card metric-card">
+        <div class="card-body">
+            <div class="metric-label">Sell Trades</div>
+            <div class="metric-value text-danger" id="sellTrades">
+                {{ trades|selectattr('side', 'equalto', 'sell')|list|length }}
+            </div>
+            <div class="small text-muted">Sales</div>
+        </div>
+    </div>
+</div>
+
+<!-- Trades Table -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="card-title mb-0">Trade History</h5>
+        <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-secondary active" onclick="toggleView('detailed')" id="detailedViewBtn">
+                <i class="fas fa-list"></i> Detailed
+            </button>
+            <button class="btn btn-outline-secondary" onclick="toggleView('summary')" id="summaryViewBtn">
+                <i class="fas fa-chart-bar"></i> Summary
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        {% if trades %}
+            <!-- Detailed View -->
+            <div id="detailedView" class="table-responsive">
+                <table class="table table-hover" id="tradesTable">
+                    <thead>
+                        <tr>
+                            <th onclick="sortTable('date')">Date/Time <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('symbol')">Symbol <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('account')">Account <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('side')">Side <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('type')">Type <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('quantity')">Quantity <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('price')">Price <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('amount')">Total Amount <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('fees')">Fees <i class="fas fa-sort"></i></th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for trade in trades %}
+                        <tr class="trade-row" data-symbol="{{ trade.symbol }}" data-side="{{ trade.side }}" data-account="{{ trade.account_id }}">
+                            <td>
+                                <div>{{ trade.executed_at.strftime('%m/%d/%Y') }}</div>
+                                <div class="small text-muted">{{ trade.executed_at.strftime('%H:%M:%S') }}</div>
+                            </td>
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <strong>{{ trade.symbol }}</strong>
+                                    {% if trade.instrument_type == 'option' %}
+                                        <span class="badge bg-info ms-2">{{ trade.option_type.upper() if trade.option_type else 'OPT' }}</span>
+                                    {% endif %}
+                                </div>
+                                {% if trade.instrument_type == 'option' and trade.strike_price %}
+                                    <div class="small text-muted">
+                                        ${{ trade.strike_price }} {{ trade.expiration_date.strftime('%m/%d') if trade.expiration_date else '' }}
+                                    </div>
+                                {% endif %}
+                            </td>
+                            <td>{{ trade.account.name }}</td>
+                            <td>
+                                <span class="badge bg-{{ 'success' if trade.side == 'buy' else 'danger' }}">
+                                    <i class="fas fa-{{ 'arrow-up' if trade.side == 'buy' else 'arrow-down' }} me-1"></i>
+                                    {{ trade.side.upper() }}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="badge bg-{{ 'primary' if trade.instrument_type == 'stock' else 'warning' }}">
+                                    {{ trade.instrument_type.upper() }}
+                                </span>
+                            </td>
+                            <td>{{ "{:,.2f}".format(trade.quantity or 0) }}</td>
+                            <td>{{ "${:,.4f}".format(trade.price or 0) }}</td>
+                            <td>
+                                <strong>{{ "${:,.2f}".format(trade.total_amount or 0) }}</strong>
+                            </td>
+                            <td>{{ "${:,.2f}".format(trade.fees or 0) }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-info" onclick="viewTradeDetails({{ trade.id }})">
+                                    <i class="fas fa-info-circle"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Summary View -->
+            <div id="summaryView" style="display: none;">
+                <div class="row">
+                    <div class="col-lg-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h6 class="card-title mb-0">Trading by Symbol</h6>
+                            </div>
+                            <div class="card-body">
+                                <canvas id="symbolChart" height="300"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h6 class="card-title mb-0">Trading Volume Over Time</h6>
+                            </div>
+                            <div class="card-body">
+                                <canvas id="volumeChart" height="300"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header">
+                                <h6 class="card-title mb-0">Trade Summary by Symbol</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-sm" id="symbolSummaryTable">
+                                        <thead>
+                                            <tr>
+                                                <th>Symbol</th>
+                                                <th>Total Trades</th>
+                                                <th>Buy Trades</th>
+                                                <th>Sell Trades</th>
+                                                <th>Total Volume</th>
+                                                <th>Net Position</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="symbolSummaryBody">
+                                            <!-- Will be populated by JavaScript -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {% else %}
+            <div class="text-center py-5">
+                <i class="fas fa-exchange-alt fa-3x text-muted mb-3"></i>
+                <h5>No Trades Found</h5>
+                <p class="text-muted">No trades match your current filters or no trading history is available.</p>
+                <button class="btn btn-primary" onclick="refreshTrades()">
+                    <i class="fas fa-sync-alt me-2"></i>Refresh Data
+                </button>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Trade Details Modal -->
+<div class="modal fade" id="tradeDetailsModal" tabindex="-1" aria-labelledby="tradeDetailsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="tradeDetailsModalLabel">
+                    <i class="fas fa-info-circle me-2"></i>Trade Details
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="tradeDetailsContent">
+                <!-- Content will be loaded dynamically -->
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let symbolChart, volumeChart;
+    let currentView = 'detailed';
+    let sortDirection = {};
+
+    $(document).ready(function() {
+        initializeCharts();
+        generateSymbolSummary();
+    });
+
+    function toggleView(view) {
+        currentView = view;
+        
+        if (view === 'detailed') {
+            $('#detailedView').show();
+            $('#summaryView').hide();
+            $('#detailedViewBtn').addClass('active');
+            $('#summaryViewBtn').removeClass('active');
+        } else {
+            $('#detailedView').hide();
+            $('#summaryView').show();
+            $('#summaryViewBtn').addClass('active');
+            $('#detailedViewBtn').removeClass('active');
+            updateCharts();
+        }
+    }
+
+    function initializeCharts() {
+        // Symbol Trading Chart
+        const symbolCtx = document.getElementById('symbolChart').getContext('2d');
+        symbolChart = new Chart(symbolCtx, {
+            type: 'doughnut',
+            data: {
+                labels: [],
+                datasets: [{
+                    data: [],
+                    backgroundColor: [
+                        '#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6',
+                        '#1abc9c', '#34495e', '#e67e22', '#95a5a6', '#d35400'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    }
+                }
+            }
+        });
+
+        // Volume Over Time Chart
+        const volumeCtx = document.getElementById('volumeChart').getContext('2d');
+        volumeChart = new Chart(volumeCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Daily Volume',
+                    data: [],
+                    borderColor: '#3498db',
+                    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return formatCurrency(value);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function updateCharts() {
+        // Get trading data for charts
+        fetch('/api/trades/summary?' + new URLSearchParams({
+            account_id: $('#accountFilter').val(),
+            days: $('#timeRange').val()
+        }))
+        .then(response => response.json())
+        .then(data => {
+            updateSymbolChart(data.trades_by_symbol);
+            updateVolumeChart(data.trades_by_day);
+        })
+        .catch(error => {
+            console.error('Error loading chart data:', error);
+        });
+    }
+
+    function updateSymbolChart(symbolData) {
+        const symbols = Object.keys(symbolData).slice(0, 10); // Top 10
+        const volumes = symbols.map(symbol => symbolData[symbol].volume);
+        
+        symbolChart.data.labels = symbols;
+        symbolChart.data.datasets[0].data = volumes;
+        symbolChart.update();
+    }
+
+    function updateVolumeChart(dayData) {
+        const dates = Object.keys(dayData).sort();
+        const volumes = dates.map(date => dayData[date].volume);
+        
+        volumeChart.data.labels = dates;
+        volumeChart.data.datasets[0].data = volumes;
+        volumeChart.update();
+    }
+
+    function generateSymbolSummary() {
+        const trades = {};
+        
+        $('#tradesTable tbody tr').each(function() {
+            const symbol = $(this).data('symbol');
+            const side = $(this).data('side');
+            const quantity = parseFloat($(this).find('td:nth-child(6)').text().replace(/,/g, '')) || 0;
+            const amount = parseFloat($(this).find('td:nth-child(8)').text().replace(/[$,]/g, '')) || 0;
+            
+            if (!trades[symbol]) {
+                trades[symbol] = {
+                    total: 0,
+                    buy: 0,
+                    sell: 0,
+                    volume: 0,
+                    netQuantity: 0
+                };
+            }
+            
+            trades[symbol].total++;
+            trades[symbol].volume += amount;
+            
+            if (side === 'buy') {
+                trades[symbol].buy++;
+                trades[symbol].netQuantity += quantity;
+            } else {
+                trades[symbol].sell++;
+                trades[symbol].netQuantity -= quantity;
+            }
+        });
+        
+        let html = '';
+        Object.keys(trades).forEach(symbol => {
+            const data = trades[symbol];
+            html += `
+                <tr>
+                    <td><strong>${symbol}</strong></td>
+                    <td>${data.total}</td>
+                    <td><span class="badge bg-success">${data.buy}</span></td>
+                    <td><span class="badge bg-danger">${data.sell}</span></td>
+                    <td>${formatCurrency(data.volume)}</td>
+                    <td class="${data.netQuantity >= 0 ? 'text-success' : 'text-danger'}">
+                        ${data.netQuantity.toFixed(2)}
+                    </td>
+                </tr>
+            `;
+        });
+        
+        $('#symbolSummaryBody').html(html);
+    }
+
+    function applyFilters() {
+        const accountId = $('#accountFilter').val();
+        const timeRange = $('#timeRange').val();
+        const side = $('#sideFilter').val();
+        
+        let url = new URL(window.location);
+        
+        if (accountId) {
+            url.searchParams.set('account_id', accountId);
+        } else {
+            url.searchParams.delete('account_id');
+        }
+        
+        if (timeRange && timeRange !== '30') {
+            url.searchParams.set('days', timeRange);
+        } else {
+            url.searchParams.delete('days');
+        }
+        
+        if (side) {
+            url.searchParams.set('side', side);
+        } else {
+            url.searchParams.delete('side');
+        }
+        
+        window.location.href = url.toString();
+    }
+
+    function filterBySymbol() {
+        const searchTerm = $('#searchSymbol').val().toUpperCase();
+        
+        $('#tradesTable tbody tr').each(function() {
+            const symbol = $(this).data('symbol');
+            if (symbol.includes(searchTerm)) {
+                $(this).show();
+            } else {
+                $(this).hide();
+            }
+        });
+        
+        updateSummaryCards();
+    }
+
+    function sortTable(column) {
+        const table = $('#tradesTable');
+        const tbody = table.find('tbody');
+        const rows = tbody.find('tr').toArray();
+        
+        sortDirection[column] = sortDirection[column] === 'asc' ? 'desc' : 'asc';
+        
+        rows.sort(function(a, b) {
+            let aVal, bVal;
+            
+            switch(column) {
+                case 'date':
+                    aVal = new Date($(a).find('td:first-child div:first-child').text());
+                    bVal = new Date($(b).find('td:first-child div:first-child').text());
+                    break;
+                case 'symbol':
+                    aVal = $(a).data('symbol');
+                    bVal = $(b).data('symbol');
+                    break;
+                case 'account':
+                    aVal = $(a).find('td:nth-child(3)').text();
+                    bVal = $(b).find('td:nth-child(3)').text();
+                    break;
+                case 'side':
+                    aVal = $(a).data('side');
+                    bVal = $(b).data('side');
+                    break;
+                case 'quantity':
+                    aVal = parseFloat($(a).find('td:nth-child(6)').text().replace(/,/g, '')) || 0;
+                    bVal = parseFloat($(b).find('td:nth-child(6)').text().replace(/,/g, '')) || 0;
+                    break;
+                case 'price':
+                    aVal = parseFloat($(a).find('td:nth-child(7)').text().replace(/[$,]/g, '')) || 0;
+                    bVal = parseFloat($(b).find('td:nth-child(7)').text().replace(/[$,]/g, '')) || 0;
+                    break;
+                case 'amount':
+                    aVal = parseFloat($(a).find('td:nth-child(8)').text().replace(/[$,]/g, '')) || 0;
+                    bVal = parseFloat($(b).find('td:nth-child(8)').text().replace(/[$,]/g, '')) || 0;
+                    break;
+                default:
+                    return 0;
+            }
+            
+            if (aVal instanceof Date) {
+                return sortDirection[column] === 'asc' ? aVal - bVal : bVal - aVal;
+            } else if (typeof aVal === 'string') {
+                aVal = aVal.toLowerCase();
+                bVal = bVal.toLowerCase();
+                return sortDirection[column] === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+            } else {
+                return sortDirection[column] === 'asc' ? aVal - bVal : bVal - aVal;
+            }
+        });
+        
+        tbody.empty().append(rows);
+    }
+
+    function viewTradeDetails(tradeId) {
+        fetch(`/api/trades/${tradeId}`)
+            .then(response => response.json())
+            .then(data => {
+                displayTradeDetails(data);
+                $('#tradeDetailsModal').modal('show');
+            })
+            .catch(error => {
+                showError('Failed to load trade details');
+                console.error('Error:', error);
+            });
+    }
+
+    function displayTradeDetails(trade) {
+        let content = `
+            <div class="row">
+                <div class="col-md-6">
+                    <h6>Trade Information</h6>
+                    <table class="table table-sm">
+                        <tr><td><strong>Symbol:</strong></td><td>${trade.symbol}</td></tr>
+                        <tr><td><strong>Account:</strong></td><td>${trade.account_name}</td></tr>
+                        <tr><td><strong>Side:</strong></td><td>
+                            <span class="badge bg-${trade.side === 'buy' ? 'success' : 'danger'}">
+                                ${trade.side.toUpperCase()}
+                            </span>
+                        </td></tr>
+                        <tr><td><strong>Type:</strong></td><td>${trade.instrument_type}</td></tr>
+                        <tr><td><strong>State:</strong></td><td>${trade.state}</td></tr>
+                        <tr><td><strong>Executed:</strong></td><td>${new Date(trade.executed_at).toLocaleString()}</td></tr>
+                    </table>
+                </div>
+                <div class="col-md-6">
+                    <h6>Financial Details</h6>
+                    <table class="table table-sm">
+                        <tr><td><strong>Quantity:</strong></td><td>${trade.quantity}</td></tr>
+                        <tr><td><strong>Price:</strong></td><td>${formatCurrency(trade.price)}</td></tr>
+                        <tr><td><strong>Total Amount:</strong></td><td>${formatCurrency(trade.total_amount)}</td></tr>
+                        <tr><td><strong>Fees:</strong></td><td>${formatCurrency(trade.fees)}</td></tr>
+                    </table>
+                </div>
+            </div>
+        `;
+        
+        if (trade.instrument_type === 'option') {
+            content += `
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <h6>Option Details</h6>
+                        <table class="table table-sm">
+                            <tr><td><strong>Option Type:</strong></td><td>${trade.option_type ? trade.option_type.toUpperCase() : 'N/A'}</td></tr>
+                            <tr><td><strong>Strike Price:</strong></td><td>${formatCurrency(trade.strike_price)}</td></tr>
+                            <tr><td><strong>Expiration Date:</strong></td><td>${trade.expiration_date ? new Date(trade.expiration_date).toLocaleDateString() : 'N/A'}</td></tr>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+        
+        $('#tradeDetailsContent').html(content);
+    }
+
+    function updateSummaryCards() {
+        const visibleRows = $('#tradesTable tbody tr:visible');
+        let totalTrades = visibleRows.length;
+        let totalVolume = 0;
+        let buyTrades = 0;
+        let sellTrades = 0;
+        
+        visibleRows.each(function() {
+            const side = $(this).data('side');
+            const amount = parseFloat($(this).find('td:nth-child(8)').text().replace(/[$,]/g, '')) || 0;
+            
+            totalVolume += amount;
+            if (side === 'buy') {
+                buyTrades++;
+            } else {
+                sellTrades++;
+            }
+        });
+        
+        $('#totalTrades').text(totalTrades);
+        $('#totalVolume').text(formatCurrency(totalVolume));
+        $('#buyTrades').text(buyTrades);
+        $('#sellTrades').text(sellTrades);
+    }
+
+    function refreshTrades() {
+        showLoading();
+        location.reload();
+    }
+
+    function exportTrades() {
+        const accountFilter = $('#accountFilter').val();
+        const timeRange = $('#timeRange').val();
+        const sideFilter = $('#sideFilter').val();
+        
+        let url = '/api/trades/export';
+        let params = new URLSearchParams();
+        
+        if (accountFilter) params.append('account_id', accountFilter);
+        if (timeRange) params.append('days', timeRange);
+        if (sideFilter) params.append('side', sideFilter);
+        
+        if (params.toString()) {
+            url += '?' + params.toString();
+        }
+        
+        window.open(url, '_blank');
+    }
+</script>
+{% endblock %}

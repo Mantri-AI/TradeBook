@@ -1,0 +1,653 @@
+{% extends "base.html" %}
+
+{% block title %}Positions - Mantri Trade Book{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2"><i class="fas fa-briefcase me-2"></i>Portfolio Positions</h1>
+    <div class="btn-toolbar mb-2 mb-md-0">
+        <div class="btn-group me-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="refreshPositions()">
+                <i class="fas fa-sync-alt me-1"></i>Refresh
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="exportPositions()">
+                <i class="fas fa-download me-1"></i>Export
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Filters Section -->
+<div class="filter-section">
+    <div class="row">
+        <div class="col-md-3">
+            <label for="accountFilter" class="form-label">Account</label>
+            <select class="form-select" id="accountFilter" onchange="applyFilters()">
+                <option value="">All Accounts</option>
+                {% for account in accounts %}
+                    <option value="{{ account.id }}" {% if selected_account == account.id|string %}selected{% endif %}>
+                        {{ account.name }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label for="typeFilter" class="form-label">Position Type</label>
+            <select class="form-select" id="typeFilter" onchange="applyFilters()">
+                <option value="all" {% if selected_type == 'all' %}selected{% endif %}>All Types</option>
+                <option value="stocks" {% if selected_type == 'stocks' %}selected{% endif %}>Stocks Only</option>
+                <option value="options" {% if selected_type == 'options' %}selected{% endif %}>Options Only</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label for="searchSymbol" class="form-label">Search Symbol</label>
+            <input type="text" class="form-control search-box" id="searchSymbol" placeholder="AAPL, TSLA, etc." 
+                   onkeyup="filterBySymbol()" autocomplete="off">
+        </div>
+        <div class="col-md-3">
+            <label for="sortBy" class="form-label">Sort By</label>
+            <select class="form-select" id="sortBy" onchange="sortPositions()">
+                <option value="value">Current Value</option>
+                <option value="symbol">Symbol</option>
+                <option value="dayChange">Day Change</option>
+                <option value="totalReturn">Total Return</option>
+            </select>
+        </div>
+    </div>
+</div>
+
+<!-- Position Summary Cards -->
+<div class="stats-grid mb-4">
+    <div class="card metric-card">
+        <div class="card-body">
+            <div class="metric-label">Total Positions</div>
+            <div class="metric-value text-primary" id="totalPositionsCount">{{ positions|length }}</div>
+            <div class="small text-muted">Holdings</div>
+        </div>
+    </div>
+    <div class="card metric-card">
+        <div class="card-body">
+            <div class="metric-label">Total Value</div>
+            <div class="metric-value" id="totalValue">
+                {{ "${:,.2f}".format(positions|sum(attribute='current_value') or 0) }}
+            </div>
+            <div class="small text-muted">Portfolio Value</div>
+        </div>
+    </div>
+    <div class="card metric-card">
+        <div class="card-body">
+            <div class="metric-label">Day Change</div>
+            <div class="metric-value" id="totalDayChange">
+                {{ "${:+,.2f}".format(positions|sum(attribute='day_change') or 0) }}
+            </div>
+            <div class="small text-muted">Today's P&L</div>
+        </div>
+    </div>
+    <div class="card metric-card">
+        <div class="card-body">
+            <div class="metric-label">Total Return</div>
+            <div class="metric-value" id="totalReturn">
+                {{ "${:+,.2f}".format(positions|sum(attribute='total_return') or 0) }}
+            </div>
+            <div class="small text-muted">Unrealized P&L</div>
+        </div>
+    </div>
+</div>
+
+<!-- Positions Table -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="card-title mb-0">Current Positions</h5>
+        <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-secondary" onclick="toggleView('table')" id="tableViewBtn">
+                <i class="fas fa-table"></i> Table
+            </button>
+            <button class="btn btn-outline-secondary" onclick="toggleView('cards')" id="cardsViewBtn">
+                <i class="fas fa-th-large"></i> Cards
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        {% if positions %}
+            <!-- Table View -->
+            <div id="tableView" class="table-responsive">
+                <table class="table table-hover" id="positionsTable">
+                    <thead>
+                        <tr>
+                            <th onclick="sortTable('symbol')">Symbol <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('account')">Account <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('type')">Type <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('quantity')">Quantity <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('avgPrice')">Avg Price <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('currentPrice')">Current Price <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('currentValue')">Current Value <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('dayChange')">Day Change <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('totalReturn')">Total Return <i class="fas fa-sort"></i></th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for position in positions %}
+                        <tr class="position-row" data-symbol="{{ position.symbol }}" data-type="{{ position.instrument_type }}" data-account="{{ position.account_id }}">
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <strong>{{ position.symbol }}</strong>
+                                    {% if position.instrument_type == 'option' %}
+                                        <span class="badge bg-info ms-2">{{ position.option_type.upper() if position.option_type else 'OPT' }}</span>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>{{ position.account.name }}</td>
+                            <td>
+                                <span class="badge bg-{{ 'primary' if position.instrument_type == 'stock' else 'warning' }}">
+                                    {{ position.instrument_type.upper() }}
+                                </span>
+                            </td>
+                            <td>{{ "{:,.2f}".format(position.quantity or 0) }}</td>
+                            <td>{{ "${:,.2f}".format(position.average_buy_price or 0) }}</td>
+                            <td>{{ "${:,.2f}".format(position.current_price or 0) }}</td>
+                            <td>
+                                <strong>{{ "${:,.2f}".format(position.current_value or 0) }}</strong>
+                            </td>
+                            <td>
+                                <span class="badge bg-{{ 'success' if (position.day_change or 0) >= 0 else 'danger' }}">
+                                    {{ "${:+,.2f}".format(position.day_change or 0) }}
+                                    {% if position.day_change_percent %}
+                                        ({{ "{:+.2f}%".format(position.day_change_percent) }})
+                                    {% endif %}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="badge bg-{{ 'success' if (position.total_return or 0) >= 0 else 'danger' }}">
+                                    {{ "${:+,.2f}".format(position.total_return or 0) }}
+                                    {% if position.total_return_percent %}
+                                        ({{ "{:+.2f}%".format(position.total_return_percent) }})
+                                    {% endif %}
+                                </span>
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-info" onclick="viewPositionDetails({{ position.id }})">
+                                    <i class="fas fa-info-circle"></i>
+                                </button>
+                                {% if position.instrument_type == 'option' %}
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="viewOptionsChain('{{ position.symbol }}')" title="Options Chain">
+                                        <i class="fas fa-link"></i>
+                                    </button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Cards View -->
+            <div id="cardsView" style="display: none;">
+                <div class="row" id="positionCards">
+                    {% for position in positions %}
+                    <div class="col-xl-4 col-lg-6 mb-3">
+                        <div class="card position-card" data-symbol="{{ position.symbol }}" data-type="{{ position.instrument_type }}" data-account="{{ position.account_id }}">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <div>
+                                        <h5 class="card-title mb-1">{{ position.symbol }}</h5>
+                                        <div class="text-muted small">{{ position.account.name }}</div>
+                                    </div>
+                                    <div class="text-end">
+                                        <span class="badge bg-{{ 'primary' if position.instrument_type == 'stock' else 'warning' }}">
+                                            {{ position.instrument_type.upper() }}
+                                        </span>
+                                        {% if position.instrument_type == 'option' %}
+                                            <span class="badge bg-info">{{ position.option_type.upper() if position.option_type else 'OPT' }}</span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="col-6">
+                                        <div class="metric-small">
+                                            <div class="value">{{ "{:,.2f}".format(position.quantity or 0) }}</div>
+                                            <div class="label">Quantity</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="metric-small">
+                                            <div class="value">{{ "${:,.2f}".format(position.current_price or 0) }}</div>
+                                            <div class="label">Current Price</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <hr class="my-2">
+                                
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="text-muted">Market Value:</span>
+                                    <strong>{{ "${:,.2f}".format(position.current_value or 0) }}</strong>
+                                </div>
+                                
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="text-muted">Day Change:</span>
+                                    <span class="badge bg-{{ 'success' if (position.day_change or 0) >= 0 else 'danger' }}">
+                                        {{ "${:+,.2f}".format(position.day_change or 0) }}
+                                    </span>
+                                </div>
+                                
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <span class="text-muted">Total Return:</span>
+                                    <span class="badge bg-{{ 'success' if (position.total_return or 0) >= 0 else 'danger' }}">
+                                        {{ "${:+,.2f}".format(position.total_return or 0) }}
+                                    </span>
+                                </div>
+                                
+                                {% if position.instrument_type == 'option' %}
+                                    <div class="option-details mb-3">
+                                        <div class="row">
+                                            <div class="col-6">
+                                                <div class="metric-small">
+                                                    <div class="value">${{ position.strike_price or 0 }}</div>
+                                                    <div class="label">Strike</div>
+                                                </div>
+                                            </div>
+                                            <div class="col-6">
+                                                <div class="metric-small">
+                                                    <div class="value">{{ position.expiration_date.strftime('%m/%d') if position.expiration_date else 'N/A' }}</div>
+                                                    <div class="label">Expires</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                {% endif %}
+                                
+                                <div class="btn-group w-100">
+                                    <button class="btn btn-outline-info btn-sm" onclick="viewPositionDetails({{ position.id }})">
+                                        <i class="fas fa-info-circle me-1"></i>Details
+                                    </button>
+                                    {% if position.instrument_type == 'option' %}
+                                        <button class="btn btn-outline-secondary btn-sm" onclick="viewOptionsChain('{{ position.symbol }}')">
+                                            <i class="fas fa-link me-1"></i>Chain
+                                        </button>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% else %}
+            <div class="text-center py-5">
+                <i class="fas fa-briefcase fa-3x text-muted mb-3"></i>
+                <h5>No Positions Found</h5>
+                <p class="text-muted">No positions match your current filters or no accounts have been synced yet.</p>
+                <button class="btn btn-primary" onclick="location.href='{{ url_for('accounts') }}'">
+                    <i class="fas fa-sync-alt me-2"></i>Sync Accounts
+                </button>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Position Details Modal -->
+<div class="modal fade" id="positionDetailsModal" tabindex="-1" aria-labelledby="positionDetailsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="positionDetailsModalLabel">
+                    <i class="fas fa-chart-line me-2"></i>Position Details
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="positionDetailsContent">
+                <!-- Content will be loaded dynamically -->
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .position-card {
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    
+    .position-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }
+    
+    .metric-small {
+        text-align: center;
+    }
+    
+    .metric-small .value {
+        font-weight: 600;
+        font-size: 0.9rem;
+    }
+    
+    .metric-small .label {
+        font-size: 0.75rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    .option-details {
+        background-color: #f8f9fa;
+        padding: 10px;
+        border-radius: 5px;
+        font-size: 0.875rem;
+    }
+    
+    .table th {
+        cursor: pointer;
+        user-select: none;
+    }
+    
+    .table th:hover {
+        background-color: rgba(52, 152, 219, 0.1);
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let currentView = 'table';
+    let sortDirection = {};
+
+    $(document).ready(function() {
+        // Initialize view
+        toggleView('table');
+        
+        // Set up real-time updates
+        setInterval(updatePrices, 60000); // Update every minute
+    });
+
+    function toggleView(view) {
+        currentView = view;
+        
+        if (view === 'table') {
+            $('#tableView').show();
+            $('#cardsView').hide();
+            $('#tableViewBtn').removeClass('btn-outline-secondary').addClass('btn-secondary');
+            $('#cardsViewBtn').removeClass('btn-secondary').addClass('btn-outline-secondary');
+        } else {
+            $('#tableView').hide();
+            $('#cardsView').show();
+            $('#cardsViewBtn').removeClass('btn-outline-secondary').addClass('btn-secondary');
+            $('#tableViewBtn').removeClass('btn-secondary').addClass('btn-outline-secondary');
+        }
+    }
+
+    function applyFilters() {
+        const accountId = $('#accountFilter').val();
+        const type = $('#typeFilter').val();
+        
+        let url = new URL(window.location);
+        
+        if (accountId) {
+            url.searchParams.set('account_id', accountId);
+        } else {
+            url.searchParams.delete('account_id');
+        }
+        
+        if (type && type !== 'all') {
+            url.searchParams.set('type', type);
+        } else {
+            url.searchParams.delete('type');
+        }
+        
+        window.location.href = url.toString();
+    }
+
+    function filterBySymbol() {
+        const searchTerm = $('#searchSymbol').val().toUpperCase();
+        
+        if (currentView === 'table') {
+            $('#positionsTable tbody tr').each(function() {
+                const symbol = $(this).data('symbol');
+                if (symbol.includes(searchTerm)) {
+                    $(this).show();
+                } else {
+                    $(this).hide();
+                }
+            });
+        } else {
+            $('#positionCards .position-card').each(function() {
+                const symbol = $(this).data('symbol');
+                if (symbol.includes(searchTerm)) {
+                    $(this).closest('.col-xl-4').show();
+                } else {
+                    $(this).closest('.col-xl-4').hide();
+                }
+            });
+        }
+        
+        updateSummaryCards();
+    }
+
+    function sortTable(column) {
+        const table = $('#positionsTable');
+        const tbody = table.find('tbody');
+        const rows = tbody.find('tr').toArray();
+        
+        // Toggle sort direction
+        sortDirection[column] = sortDirection[column] === 'asc' ? 'desc' : 'asc';
+        
+        rows.sort(function(a, b) {
+            let aVal, bVal;
+            
+            switch(column) {
+                case 'symbol':
+                    aVal = $(a).data('symbol');
+                    bVal = $(b).data('symbol');
+                    break;
+                case 'account':
+                    aVal = $(a).find('td:nth-child(2)').text();
+                    bVal = $(b).find('td:nth-child(2)').text();
+                    break;
+                case 'type':
+                    aVal = $(a).data('type');
+                    bVal = $(b).data('type');
+                    break;
+                case 'quantity':
+                    aVal = parseFloat($(a).find('td:nth-child(4)').text().replace(/,/g, '')) || 0;
+                    bVal = parseFloat($(b).find('td:nth-child(4)').text().replace(/,/g, '')) || 0;
+                    break;
+                case 'avgPrice':
+                    aVal = parseFloat($(a).find('td:nth-child(5)').text().replace(/[$,]/g, '')) || 0;
+                    bVal = parseFloat($(b).find('td:nth-child(5)').text().replace(/[$,]/g, '')) || 0;
+                    break;
+                case 'currentPrice':
+                    aVal = parseFloat($(a).find('td:nth-child(6)').text().replace(/[$,]/g, '')) || 0;
+                    bVal = parseFloat($(b).find('td:nth-child(6)').text().replace(/[$,]/g, '')) || 0;
+                    break;
+                case 'currentValue':
+                    aVal = parseFloat($(a).find('td:nth-child(7)').text().replace(/[$,]/g, '')) || 0;
+                    bVal = parseFloat($(b).find('td:nth-child(7)').text().replace(/[$,]/g, '')) || 0;
+                    break;
+                case 'dayChange':
+                    aVal = parseFloat($(a).find('td:nth-child(8) .badge').text().replace(/[$,+]/g, '')) || 0;
+                    bVal = parseFloat($(b).find('td:nth-child(8) .badge').text().replace(/[$,+]/g, '')) || 0;
+                    break;
+                case 'totalReturn':
+                    aVal = parseFloat($(a).find('td:nth-child(9) .badge').text().replace(/[$,+]/g, '')) || 0;
+                    bVal = parseFloat($(b).find('td:nth-child(9) .badge').text().replace(/[$,+]/g, '')) || 0;
+                    break;
+                default:
+                    return 0;
+            }
+            
+            if (typeof aVal === 'string') {
+                aVal = aVal.toLowerCase();
+                bVal = bVal.toLowerCase();
+                return sortDirection[column] === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+            } else {
+                return sortDirection[column] === 'asc' ? aVal - bVal : bVal - aVal;
+            }
+        });
+        
+        tbody.empty().append(rows);
+        
+        // Update sort indicators
+        table.find('th i').removeClass('fa-sort-up fa-sort-down').addClass('fa-sort');
+        table.find(`th:contains('${column}') i`).removeClass('fa-sort')
+            .addClass(sortDirection[column] === 'asc' ? 'fa-sort-up' : 'fa-sort-down');
+    }
+
+    function sortPositions() {
+        const sortBy = $('#sortBy').val();
+        // Implementation depends on current view and sort criteria
+        showSuccess('Sorting by ' + sortBy);
+    }
+
+    function updateSummaryCards() {
+        // Recalculate summary metrics for visible positions
+        let visibleRows;
+        
+        if (currentView === 'table') {
+            visibleRows = $('#positionsTable tbody tr:visible');
+        } else {
+            visibleRows = $('#positionCards .position-card:visible');
+        }
+        
+        let totalCount = visibleRows.length;
+        let totalValue = 0;
+        let totalDayChange = 0;
+        let totalReturn = 0;
+        
+        visibleRows.each(function() {
+            // Extract values and sum them up
+            // This is a simplified version - you might need more complex parsing
+        });
+        
+        $('#totalPositionsCount').text(totalCount);
+        // Update other summary cards as needed
+    }
+
+    function viewPositionDetails(positionId) {
+        fetch(`/api/positions/${positionId}`)
+            .then(response => response.json())
+            .then(data => {
+                displayPositionDetails(data);
+                $('#positionDetailsModal').modal('show');
+            })
+            .catch(error => {
+                showError('Failed to load position details');
+                console.error('Error:', error);
+            });
+    }
+
+    function displayPositionDetails(position) {
+        let content = `
+            <div class="row">
+                <div class="col-md-6">
+                    <h6>Position Information</h6>
+                    <table class="table table-sm">
+                        <tr><td><strong>Symbol:</strong></td><td>${position.symbol}</td></tr>
+                        <tr><td><strong>Account:</strong></td><td>${position.account_name}</td></tr>
+                        <tr><td><strong>Type:</strong></td><td>${position.instrument_type}</td></tr>
+                        <tr><td><strong>Quantity:</strong></td><td>${position.quantity}</td></tr>
+                        <tr><td><strong>Avg Buy Price:</strong></td><td>${formatCurrency(position.average_buy_price)}</td></tr>
+                        <tr><td><strong>Current Price:</strong></td><td>${formatCurrency(position.current_price)}</td></tr>
+                    </table>
+                </div>
+                <div class="col-md-6">
+                    <h6>Performance</h6>
+                    <table class="table table-sm">
+                        <tr><td><strong>Current Value:</strong></td><td>${formatCurrency(position.current_value)}</td></tr>
+                        <tr><td><strong>Day Change:</strong></td><td class="${position.day_change >= 0 ? 'text-success' : 'text-danger'}">${formatCurrency(position.day_change)}</td></tr>
+                        <tr><td><strong>Day Change %:</strong></td><td class="${position.day_change_percent >= 0 ? 'text-success' : 'text-danger'}">${formatPercent(position.day_change_percent)}</td></tr>
+                        <tr><td><strong>Total Return:</strong></td><td class="${position.total_return >= 0 ? 'text-success' : 'text-danger'}">${formatCurrency(position.total_return)}</td></tr>
+                        <tr><td><strong>Total Return %:</strong></td><td class="${position.total_return_percent >= 0 ? 'text-success' : 'text-danger'}">${formatPercent(position.total_return_percent)}</td></tr>
+                        <tr><td><strong>Last Updated:</strong></td><td>${new Date(position.updated_at).toLocaleString()}</td></tr>
+                    </table>
+                </div>
+            </div>
+        `;
+        
+        if (position.instrument_type === 'option') {
+            content += `
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <h6>Option Details</h6>
+                        <table class="table table-sm">
+                            <tr><td><strong>Option Type:</strong></td><td>${position.option_type ? position.option_type.toUpperCase() : 'N/A'}</td></tr>
+                            <tr><td><strong>Strike Price:</strong></td><td>${formatCurrency(position.strike_price)}</td></tr>
+                            <tr><td><strong>Expiration Date:</strong></td><td>${position.expiration_date ? new Date(position.expiration_date).toLocaleDateString() : 'N/A'}</td></tr>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+        
+        $('#positionDetailsContent').html(content);
+    }
+
+    function viewOptionsChain(symbol) {
+        // This would open an options chain view
+        showSuccess(`Options chain for ${symbol} - Feature coming soon!`);
+    }
+
+    function refreshPositions() {
+        showLoading();
+        
+        // Refresh all account data
+        fetch('/api/sync-all', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                hideLoading();
+                if (data.success) {
+                    showSuccess('Positions refreshed successfully');
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    showError(data.message || 'Refresh failed');
+                }
+            })
+            .catch(error => {
+                hideLoading();
+                showError('Network error occurred');
+                console.error('Error:', error);
+            });
+    }
+
+    function exportPositions() {
+        const accountFilter = $('#accountFilter').val();
+        const typeFilter = $('#typeFilter').val();
+        
+        let url = '/api/positions/export';
+        let params = new URLSearchParams();
+        
+        if (accountFilter) params.append('account_id', accountFilter);
+        if (typeFilter && typeFilter !== 'all') params.append('type', typeFilter);
+        
+        if (params.toString()) {
+            url += '?' + params.toString();
+        }
+        
+        window.open(url, '_blank');
+    }
+
+    function updatePrices() {
+        // Fetch updated prices for all positions
+        fetch('/api/positions/prices')
+            .then(response => response.json())
+            .then(data => {
+                // Update prices in the current view without full page reload
+                if (data.prices) {
+                    updatePositionPrices(data.prices);
+                }
+            })
+            .catch(error => {
+                console.error('Error updating prices:', error);
+            });
+    }
+
+    function updatePositionPrices(prices) {
+        // Update prices in table or cards view
+        // This would be implemented to update the UI with new prices
+        console.log('Updating prices:', prices);
+    }
+</script>
+{% endblock %}
