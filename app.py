@@ -1,12 +1,14 @@
 
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
-from flask_migrate import Migrate
 from datetime import datetime, timedelta
 import os
 import json
+import logging
 from werkzeug.security import generate_password_hash, check_password_hash
 import secrets
+
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -17,16 +19,15 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Initialize extensions
 from models.database import db
-migrate = Migrate()
 
 # Initialize with app
 db.init_app(app)
-migrate.init_app(app, db)
 
 # Import models and services after db initialization
 from models.database import Account, Position, Trade, StockData, OptionData
 from services.robinhood_service import RobinhoodService
 from services.data_analyzer import DataAnalyzer
+from services.csv_import_service import CSVImportService
 
 # Routes
 @app.route('/')
@@ -128,7 +129,6 @@ def analytics():
 def api_test_connection():
     """Test Robinhood connection with provided credentials"""
     data = request.get_json()
-    import ipdb; ipdb.set_trace()
     
     username = data.get('username')
     password = data.get('password')
@@ -167,40 +167,49 @@ def api_accounts():
     """API for account management"""
     if request.method == 'POST':
         data = request.get_json()
-        import ipdb; ipdb.set_trace()
+        
         # Validate required fields
         name = data.get('name')
+        provider = data.get('provider', 'robinhood')
+        auth_type = data.get('authentication_type', 'manual')
         username = data.get('username')
         password = data.get('password')
         mfa_code = data.get('mfa_code', '')
         
-        if not name or not username or not password:
-            return jsonify({'success': False, 'message': 'Name, username, and password are required'}), 400
+        if not name or not provider:
+            return jsonify({'success': False, 'message': 'Name and provider are required'}), 400
         
-        # Check if username already exists
-        existing_account = Account.query.filter_by(username=username).first()
-        if existing_account:
-            return jsonify({'success': False, 'message': 'An account with this username already exists'}), 400
+        if auth_type == 'api_auth' and (not username or not password):
+            return jsonify({'success': False, 'message': 'Username and password are required for API authentication'}), 400
+        
+        # Check if username already exists for this provider (if username provided)
+        if username:
+            existing_account = Account.query.filter_by(provider=provider, username=username).first()
+            if existing_account:
+                return jsonify({'success': False, 'message': f'An account with this username already exists for {provider}'}), 400
         
         # Create new account
         account = Account(
             name=name,
+            provider=provider,
             username=username,
+            authentication_type=auth_type,
             is_active=True
         )
         
-        # Encrypt and store credentials
-        credentials = {
-            'username': username,
-            'password': password,
-            'mfa_code': mfa_code
-        }
-        account.encrypt_credentials(credentials)
+        # Encrypt and store credentials if provided
+        if auth_type == 'api_auth' and username and password:
+            credentials = {
+                'username': username,
+                'password': password,
+                'mfa_code': mfa_code
+            }
+            account.encrypt_credentials(credentials)
         
         try:
             db.session.add(account)
             db.session.commit()
-            return jsonify({'success': True, 'message': 'Account added successfully'})
+            return jsonify({'success': True, 'message': 'Account added successfully', 'account_id': account.id})
         except Exception as e:
             db.session.rollback()
             return jsonify({'success': False, 'message': str(e)}), 400
@@ -210,7 +219,9 @@ def api_accounts():
     return jsonify([{
         'id': acc.id,
         'name': acc.name,
+        'provider': acc.provider,
         'username': acc.username,
+        'authentication_type': acc.authentication_type,
         'is_active': acc.is_active,
         'created_at': acc.created_at.isoformat(),
         'last_sync': acc.last_sync.isoformat() if acc.last_sync else None
@@ -274,6 +285,84 @@ def api_account_details(account_id):
             'buying_power': account.buying_power or 0
         }
     })
+
+@app.route('/api/accounts/import-csv', methods=['POST'])
+def api_import_csv():
+    """Import CSV transaction data"""
+    try:
+        if 'csv_file' not in request.files:
+            return jsonify({'success': False, 'message': 'No CSV file provided'}), 400
+        
+        csv_file = request.files['csv_file']
+        account_name = request.form.get('account_name')
+        provider = request.form.get('provider', 'robinhood')
+        
+        if not csv_file.filename:
+            return jsonify({'success': False, 'message': 'No file selected'}), 400
+        
+        if not account_name:
+            return jsonify({'success': False, 'message': 'Account name is required'}), 400
+        
+        # Create account if it doesn't exist
+        account = Account.query.filter_by(name=account_name, provider=provider).first()
+        if not account:
+            account = Account(
+                name=account_name,
+                provider=provider,
+                authentication_type='manual',
+                is_active=True
+            )
+            db.session.add(account)
+            db.session.commit()
+        
+        # Read CSV content
+        csv_content = csv_file.read().decode('utf-8')
+        
+        # Import based on provider
+        csv_service = CSVImportService()
+        
+        if provider == 'robinhood':
+            result = csv_service.import_robinhood_csv(csv_content, account)
+        else:
+            # For other providers, use generic import (future enhancement)
+            return jsonify({'success': False, 'message': f'CSV import for {provider} not yet supported'}), 400
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error in CSV import: {str(e)}")
+        return jsonify({'success': False, 'message': f'Import error: {str(e)}'}), 500
+
+@app.route('/api/accounts/<int:account_id>/import-csv', methods=['POST'])
+def api_import_csv_to_account(account_id):
+    """Import CSV data to existing account"""
+    try:
+        account = Account.query.get_or_404(account_id)
+        
+        if 'csv_file' not in request.files:
+            return jsonify({'success': False, 'message': 'No CSV file provided'}), 400
+        
+        csv_file = request.files['csv_file']
+        
+        if not csv_file.filename:
+            return jsonify({'success': False, 'message': 'No file selected'}), 400
+        
+        # Read CSV content
+        csv_content = csv_file.read().decode('utf-8')
+        
+        # Import based on provider
+        csv_service = CSVImportService()
+        
+        if account.provider == 'robinhood':
+            result = csv_service.import_robinhood_csv(csv_content, account)
+        else:
+            return jsonify({'success': False, 'message': f'CSV import for {account.provider} not yet supported'}), 400
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error in CSV import: {str(e)}")
+        return jsonify({'success': False, 'message': f'Import error: {str(e)}'}), 500
 
 @app.route('/api/sync-all', methods=['POST'])
 def api_sync_all():
@@ -431,6 +520,109 @@ def api_positions_top():
     
     return jsonify({
         'positions': [position.to_dict() for position in positions]
+    })
+
+# Enhanced Analytics API Endpoints
+@app.route('/api/analytics/cross-account')
+def api_cross_account_analytics():
+    """Get cross-account analytics"""
+    account_ids_param = request.args.get('account_ids')
+    account_ids = None
+    
+    if account_ids_param:
+        try:
+            account_ids = [int(x) for x in account_ids_param.split(',')]
+        except ValueError:
+            return jsonify({'success': False, 'message': 'Invalid account IDs format'}), 400
+    
+    analyzer = DataAnalyzer()
+    result = analyzer.get_cross_account_analytics(account_ids)
+    return jsonify(result)
+
+@app.route('/api/analytics/instrument/<symbol>')
+def api_instrument_analytics(symbol):
+    """Get analytics for a specific instrument"""
+    account_ids_param = request.args.get('account_ids')
+    account_ids = None
+    
+    if account_ids_param:
+        try:
+            account_ids = [int(x) for x in account_ids_param.split(',')]
+        except ValueError:
+            return jsonify({'success': False, 'message': 'Invalid account IDs format'}), 400
+    
+    analyzer = DataAnalyzer()
+    result = analyzer.get_instrument_analytics(symbol, account_ids)
+    return jsonify(result)
+
+@app.route('/api/analytics/pnl-over-time')
+def api_pnl_over_time():
+    """Get P&L over time analytics"""
+    account_ids_param = request.args.get('account_ids')
+    start_date_param = request.args.get('start_date')
+    end_date_param = request.args.get('end_date')
+    
+    account_ids = None
+    start_date = None
+    end_date = None
+    
+    if account_ids_param:
+        try:
+            account_ids = [int(x) for x in account_ids_param.split(',')]
+        except ValueError:
+            return jsonify({'success': False, 'message': 'Invalid account IDs format'}), 400
+    
+    if start_date_param:
+        try:
+            start_date = datetime.strptime(start_date_param, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'success': False, 'message': 'Invalid start_date format. Use YYYY-MM-DD'}), 400
+    
+    if end_date_param:
+        try:
+            end_date = datetime.strptime(end_date_param, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'success': False, 'message': 'Invalid end_date format. Use YYYY-MM-DD'}), 400
+    
+    analyzer = DataAnalyzer()
+    result = analyzer.get_pnl_over_time(account_ids, start_date, end_date)
+    return jsonify(result)
+
+@app.route('/api/analytics/trans-codes')
+def api_trans_code_analytics():
+    """Get transaction code analytics"""
+    account_ids_param = request.args.get('account_ids')
+    account_ids = None
+    
+    if account_ids_param:
+        try:
+            account_ids = [int(x) for x in account_ids_param.split(',')]
+        except ValueError:
+            return jsonify({'success': False, 'message': 'Invalid account IDs format'}), 400
+    
+    analyzer = DataAnalyzer()
+    result = analyzer.get_trans_code_analytics(account_ids)
+    return jsonify(result)
+
+@app.route('/api/analytics/symbols')
+def api_symbols_list():
+    """Get list of all traded symbols"""
+    account_ids_param = request.args.get('account_ids')
+    
+    query = db.session.query(Trade.symbol).distinct().join(Account)
+    
+    if account_ids_param:
+        try:
+            account_ids = [int(x) for x in account_ids_param.split(',')]
+            query = query.filter(Account.id.in_(account_ids))
+        except ValueError:
+            return jsonify({'success': False, 'message': 'Invalid account IDs format'}), 400
+    
+    symbols = query.filter(Account.is_active == True).all()
+    
+    return jsonify({
+        'symbols': [symbol[0] for symbol in symbols],
+        'count': len(symbols)
     })
 
 def _get_trades_by_day(trades):

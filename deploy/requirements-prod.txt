@@ -1,0 +1,16 @@
+# Production requirements for deployment
+-r ../requirements.txt
+
+# Additional production dependencies
+psycopg2-binary==2.9.9
+redis==5.0.1
+celery==5.3.4
+flower==2.0.1
+
+# Monitoring and logging
+sentry-sdk[flask]==1.39.1
+prometheus-flask-exporter==0.23.0
+
+# Security
+flask-limiter==3.5.0
+flask-cors==4.0.0

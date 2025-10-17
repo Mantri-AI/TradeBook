@@ -6,20 +6,23 @@ from datetime import datetime, timezone
 from sqlalchemy import Index, UniqueConstraint
 from cryptography.fernet import Fernet
 import json
+import base64
 import os
 
 # This will be initialized from the main app
 db = SQLAlchemy()
 
 class Account(db.Model):
-    """Robinhood account model"""
+    """Multi-provider account model"""
     __tablename__ = 'accounts'
     
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
-    username = db.Column(db.String(100), unique=True, nullable=False)
+    provider = db.Column(db.String(50), nullable=False, default='robinhood')  # robinhood, fidelity, webull, schwab
+    username = db.Column(db.String(100), nullable=True)  # Can be null for manual accounts
     encrypted_credentials = db.Column(db.Text)  # Encrypted JSON with credentials
-    robinhood_account_id = db.Column(db.String(100), unique=True)
+    external_account_id = db.Column(db.String(100))  # Provider-specific account ID
+    authentication_type = db.Column(db.String(20), default='manual')  # manual, api_auth
     
     # Status and metadata
     is_active = db.Column(db.Boolean, default=True, nullable=False)
@@ -27,7 +30,7 @@ class Account(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_sync = db.Column(db.DateTime)
     
-    # Account details from Robinhood
+    # Account details (provider-specific)
     account_number = db.Column(db.String(50))
     buying_power = db.Column(db.Float)
     total_portfolio_value = db.Column(db.Float)
@@ -38,8 +41,13 @@ class Account(db.Model):
     positions = db.relationship('Position', backref='account', lazy='dynamic', cascade='all, delete-orphan')
     trades = db.relationship('Trade', backref='account', lazy='dynamic', cascade='all, delete-orphan')
     
+    # Table constraints
+    __table_args__ = (
+        UniqueConstraint('provider', 'username', name='uq_provider_username'),
+    )
+    
     def __repr__(self):
-        return f'<Account {self.name} ({self.username})>'
+        return f'<Account {self.name} ({self.provider})>'
     
     def encrypt_credentials(self, credentials_dict):
         """Encrypt and store credentials"""
@@ -86,7 +94,9 @@ class Account(db.Model):
         return {
             'id': self.id,
             'name': self.name,
+            'provider': self.provider,
             'username': self.username,
+            'authentication_type': self.authentication_type,
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat(),
             'last_sync': self.last_sync.isoformat() if self.last_sync else None,
@@ -173,7 +183,14 @@ class Trade(db.Model):
     # Trade identifiers
     symbol = db.Column(db.String(20), nullable=False, index=True)
     instrument_type = db.Column(db.String(20), nullable=False)  # 'stock' or 'option'
-    robinhood_trade_id = db.Column(db.String(100), unique=True)
+    external_trade_id = db.Column(db.String(100))  # Provider-specific trade ID
+    
+    # CSV Import fields (for robinhood format)
+    activity_date = db.Column(db.Date, nullable=False, index=True)
+    process_date = db.Column(db.Date)
+    settle_date = db.Column(db.Date)
+    description = db.Column(db.String(200))
+    trans_code = db.Column(db.String(10), nullable=False, index=True)  # STO, BTO, etc.
     
     # Trade details
     side = db.Column(db.String(10), nullable=False)  # 'buy' or 'sell'
@@ -191,13 +208,16 @@ class Trade(db.Model):
     executed_at = db.Column(db.DateTime, nullable=False, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     
-    # Trade state
+    # Trade state and source
     state = db.Column(db.String(20), default='filled')  # filled, cancelled, rejected, etc.
+    import_source = db.Column(db.String(20), default='api')  # api, csv_import
     
-    # Indexes
+    # Indexes and constraints for deduplication
     __table_args__ = (
         Index('idx_account_symbol_date', 'account_id', 'symbol', 'executed_at'),
         Index('idx_executed_at_desc', 'executed_at', postgresql_ops={'executed_at': 'DESC'}),
+        UniqueConstraint('account_id', 'symbol', 'activity_date', 'trans_code', 'total_amount', 
+                        name='uq_trade_dedup'),
     )
     
     def __repr__(self):
@@ -211,6 +231,11 @@ class Trade(db.Model):
             'account_name': self.account.name,
             'symbol': self.symbol,
             'instrument_type': self.instrument_type,
+            'description': self.description,
+            'trans_code': self.trans_code,
+            'activity_date': self.activity_date.isoformat() if self.activity_date else None,
+            'process_date': self.process_date.isoformat() if self.process_date else None,
+            'settle_date': self.settle_date.isoformat() if self.settle_date else None,
             'side': self.side,
             'quantity': self.quantity,
             'price': self.price,
@@ -220,7 +245,8 @@ class Trade(db.Model):
             'strike_price': self.strike_price,
             'expiration_date': self.expiration_date.isoformat() if self.expiration_date else None,
             'executed_at': self.executed_at.isoformat(),
-            'state': self.state
+            'state': self.state,
+            'import_source': self.import_source
         }
 
 

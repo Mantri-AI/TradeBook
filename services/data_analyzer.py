@@ -378,3 +378,343 @@ class DataAnalyzer:
         # This is a simplified implementation
         # Proper calculation requires matching buy/sell pairs
         return 0.0  # Placeholder
+    
+    # New enhanced analytics methods
+    def get_cross_account_analytics(self, account_ids: Optional[List[int]] = None) -> Dict[str, Any]:
+        """
+        Get analytics across multiple accounts
+        
+        Args:
+            account_ids: Optional list of account IDs to include
+            
+        Returns:
+            Dictionary with cross-account analytics
+        """
+        try:
+            # Base query for trades
+            query = db.session.query(Trade).join(Account)
+            if account_ids:
+                query = query.filter(Account.id.in_(account_ids))
+            
+            trades = query.filter(Account.is_active == True).all()
+            
+            # Group by account
+            accounts_data = {}
+            for trade in trades:
+                account_name = trade.account.name
+                if account_name not in accounts_data:
+                    accounts_data[account_name] = {
+                        'trades': [],
+                        'total_volume': 0,
+                        'buy_volume': 0,
+                        'sell_volume': 0,
+                        'symbols': set()
+                    }
+                
+                accounts_data[account_name]['trades'].append(trade)
+                accounts_data[account_name]['total_volume'] += abs(trade.total_amount)
+                accounts_data[account_name]['symbols'].add(trade.symbol)
+                
+                if trade.side == 'buy':
+                    accounts_data[account_name]['buy_volume'] += abs(trade.total_amount)
+                else:
+                    accounts_data[account_name]['sell_volume'] += abs(trade.total_amount)
+            
+            # Convert sets to counts
+            for account_name in accounts_data:
+                accounts_data[account_name]['unique_symbols'] = len(accounts_data[account_name]['symbols'])
+                del accounts_data[account_name]['symbols']
+            
+            return {
+                'success': True,
+                'accounts_data': accounts_data,
+                'total_accounts': len(accounts_data),
+                'combined_volume': sum([acc['total_volume'] for acc in accounts_data.values()]),
+                'combined_trades': len(trades)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in cross-account analytics: {str(e)}")
+            return {'success': False, 'message': str(e)}
+    
+    def get_instrument_analytics(self, symbol: str, account_ids: Optional[List[int]] = None) -> Dict[str, Any]:
+        """
+        Get detailed analytics for a specific instrument
+        
+        Args:
+            symbol: Stock/option symbol to analyze
+            account_ids: Optional list of account IDs to include
+            
+        Returns:
+            Dictionary with instrument analytics
+        """
+        try:
+            # Base query for trades
+            query = db.session.query(Trade).join(Account).filter(Trade.symbol == symbol.upper())
+            if account_ids:
+                query = query.filter(Account.id.in_(account_ids))
+            
+            trades = query.filter(Account.is_active == True).order_by(Trade.activity_date).all()
+            
+            if not trades:
+                return {'success': False, 'message': f'No trades found for {symbol}'}
+            
+            # Calculate metrics
+            total_quantity_bought = sum([t.quantity for t in trades if t.side == 'buy'])
+            total_quantity_sold = sum([t.quantity for t in trades if t.side == 'sell'])
+            total_buy_amount = sum([t.total_amount for t in trades if t.side == 'buy'])
+            total_sell_amount = sum([t.total_amount for t in trades if t.side == 'sell'])
+            
+            avg_buy_price = total_buy_amount / total_quantity_bought if total_quantity_bought > 0 else 0
+            avg_sell_price = total_sell_amount / total_quantity_sold if total_quantity_sold > 0 else 0
+            
+            # P&L calculation (simplified)
+            realized_pnl = total_sell_amount - total_buy_amount
+            
+            # Transaction code analysis
+            trans_code_stats = {}
+            for trade in trades:
+                if trade.trans_code not in trans_code_stats:
+                    trans_code_stats[trade.trans_code] = {
+                        'count': 0,
+                        'total_amount': 0,
+                        'total_quantity': 0
+                    }
+                trans_code_stats[trade.trans_code]['count'] += 1
+                trans_code_stats[trade.trans_code]['total_amount'] += trade.total_amount
+                trans_code_stats[trade.trans_code]['total_quantity'] += trade.quantity
+            
+            # Time series data for charts
+            daily_data = {}
+            for trade in trades:
+                date_str = trade.activity_date.isoformat()
+                if date_str not in daily_data:
+                    daily_data[date_str] = {
+                        'date': date_str,
+                        'trades': 0,
+                        'volume': 0,
+                        'buy_volume': 0,
+                        'sell_volume': 0
+                    }
+                daily_data[date_str]['trades'] += 1
+                daily_data[date_str]['volume'] += trade.total_amount
+                if trade.side == 'buy':
+                    daily_data[date_str]['buy_volume'] += trade.total_amount
+                else:
+                    daily_data[date_str]['sell_volume'] += trade.total_amount
+            
+            return {
+                'success': True,
+                'symbol': symbol.upper(),
+                'total_trades': len(trades),
+                'date_range': {
+                    'start': trades[0].activity_date.isoformat(),
+                    'end': trades[-1].activity_date.isoformat()
+                },
+                'quantity_metrics': {
+                    'total_bought': total_quantity_bought,
+                    'total_sold': total_quantity_sold,
+                    'net_position': total_quantity_bought - total_quantity_sold
+                },
+                'price_metrics': {
+                    'avg_buy_price': round(avg_buy_price, 2),
+                    'avg_sell_price': round(avg_sell_price, 2),
+                    'price_improvement': round(avg_sell_price - avg_buy_price, 2) if avg_buy_price > 0 and avg_sell_price > 0 else 0
+                },
+                'pnl_metrics': {
+                    'total_buy_amount': round(total_buy_amount, 2),
+                    'total_sell_amount': round(total_sell_amount, 2),
+                    'realized_pnl': round(realized_pnl, 2),
+                    'pnl_percentage': round((realized_pnl / total_buy_amount * 100), 2) if total_buy_amount > 0 else 0
+                },
+                'trans_code_breakdown': trans_code_stats,
+                'daily_data': list(daily_data.values()),
+                'accounts_involved': list(set([t.account.name for t in trades]))
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in instrument analytics: {str(e)}")
+            return {'success': False, 'message': str(e)}
+    
+    def get_pnl_over_time(self, account_ids: Optional[List[int]] = None, 
+                         start_date: Optional[date] = None, 
+                         end_date: Optional[date] = None) -> Dict[str, Any]:
+        """
+        Get P&L analysis over time
+        
+        Args:
+            account_ids: Optional list of account IDs to include
+            start_date: Start date for analysis
+            end_date: End date for analysis
+            
+        Returns:
+            Dictionary with P&L over time data
+        """
+        try:
+            # Default date range
+            if not end_date:
+                end_date = date.today()
+            if not start_date:
+                start_date = end_date - timedelta(days=365)  # Last year
+            
+            # Base query for trades
+            query = db.session.query(Trade).join(Account)
+            if account_ids:
+                query = query.filter(Account.id.in_(account_ids))
+            
+            query = query.filter(
+                Trade.activity_date >= start_date,
+                Trade.activity_date <= end_date,
+                Account.is_active == True
+            ).order_by(Trade.activity_date)
+            
+            trades = query.all()
+            
+            # Calculate daily P&L
+            daily_pnl = {}
+            cumulative_pnl = 0
+            
+            for trade in trades:
+                date_str = trade.activity_date.isoformat()
+                
+                if date_str not in daily_pnl:
+                    daily_pnl[date_str] = {
+                        'date': date_str,
+                        'trades': 0,
+                        'buy_amount': 0,
+                        'sell_amount': 0,
+                        'daily_pnl': 0,
+                        'cumulative_pnl': 0
+                    }
+                
+                daily_pnl[date_str]['trades'] += 1
+                
+                if trade.side == 'buy':
+                    daily_pnl[date_str]['buy_amount'] += trade.total_amount
+                    daily_pnl[date_str]['daily_pnl'] -= trade.total_amount  # Cost
+                else:
+                    daily_pnl[date_str]['sell_amount'] += trade.total_amount
+                    daily_pnl[date_str]['daily_pnl'] += trade.total_amount  # Revenue
+            
+            # Calculate cumulative P&L
+            for date_str in sorted(daily_pnl.keys()):
+                cumulative_pnl += daily_pnl[date_str]['daily_pnl']
+                daily_pnl[date_str]['cumulative_pnl'] = cumulative_pnl
+            
+            # Monthly aggregation
+            monthly_pnl = {}
+            for date_str, data in daily_pnl.items():
+                month_key = date_str[:7]  # YYYY-MM
+                if month_key not in monthly_pnl:
+                    monthly_pnl[month_key] = {
+                        'month': month_key,
+                        'trades': 0,
+                        'monthly_pnl': 0,
+                        'buy_amount': 0,
+                        'sell_amount': 0
+                    }
+                monthly_pnl[month_key]['trades'] += data['trades']
+                monthly_pnl[month_key]['monthly_pnl'] += data['daily_pnl']
+                monthly_pnl[month_key]['buy_amount'] += data['buy_amount']
+                monthly_pnl[month_key]['sell_amount'] += data['sell_amount']
+            
+            return {
+                'success': True,
+                'date_range': {
+                    'start': start_date.isoformat(),
+                    'end': end_date.isoformat()
+                },
+                'summary': {
+                    'total_trades': len(trades),
+                    'total_pnl': round(cumulative_pnl, 2),
+                    'average_daily_pnl': round(cumulative_pnl / len(daily_pnl), 2) if daily_pnl else 0,
+                    'best_day': max(daily_pnl.values(), key=lambda x: x['daily_pnl'])['date'] if daily_pnl else None,
+                    'worst_day': min(daily_pnl.values(), key=lambda x: x['daily_pnl'])['date'] if daily_pnl else None
+                },
+                'daily_data': list(daily_pnl.values()),
+                'monthly_data': list(monthly_pnl.values())
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in P&L over time analysis: {str(e)}")
+            return {'success': False, 'message': str(e)}
+    
+    def get_trans_code_analytics(self, account_ids: Optional[List[int]] = None) -> Dict[str, Any]:
+        """
+        Get analytics by transaction code
+        
+        Args:
+            account_ids: Optional list of account IDs to include
+            
+        Returns:
+            Dictionary with transaction code analytics
+        """
+        try:
+            # Base query for trades
+            query = db.session.query(Trade).join(Account)
+            if account_ids:
+                query = query.filter(Account.id.in_(account_ids))
+            
+            trades = query.filter(Account.is_active == True).all()
+            
+            # Group by transaction code
+            trans_code_stats = {}
+            for trade in trades:
+                code = trade.trans_code
+                if code not in trans_code_stats:
+                    trans_code_stats[code] = {
+                        'trans_code': code,
+                        'count': 0,
+                        'total_amount': 0,
+                        'total_quantity': 0,
+                        'avg_price': 0,
+                        'symbols': set(),
+                        'accounts': set(),
+                        'date_range': {'start': None, 'end': None}
+                    }
+                
+                stats = trans_code_stats[code]
+                stats['count'] += 1
+                stats['total_amount'] += trade.total_amount
+                stats['total_quantity'] += trade.quantity
+                stats['symbols'].add(trade.symbol)
+                stats['accounts'].add(trade.account.name)
+                
+                # Update date range
+                if not stats['date_range']['start'] or trade.activity_date < stats['date_range']['start']:
+                    stats['date_range']['start'] = trade.activity_date
+                if not stats['date_range']['end'] or trade.activity_date > stats['date_range']['end']:
+                    stats['date_range']['end'] = trade.activity_date
+            
+            # Finalize calculations
+            for code in trans_code_stats:
+                stats = trans_code_stats[code]
+                stats['avg_price'] = stats['total_amount'] / stats['total_quantity'] if stats['total_quantity'] > 0 else 0
+                stats['unique_symbols'] = len(stats['symbols'])
+                stats['unique_accounts'] = len(stats['accounts'])
+                stats['symbols'] = list(stats['symbols'])
+                stats['accounts'] = list(stats['accounts'])
+                
+                # Convert dates to strings
+                if stats['date_range']['start']:
+                    stats['date_range']['start'] = stats['date_range']['start'].isoformat()
+                if stats['date_range']['end']:
+                    stats['date_range']['end'] = stats['date_range']['end'].isoformat()
+            
+            # Sort by total amount
+            sorted_stats = sorted(trans_code_stats.values(), key=lambda x: x['total_amount'], reverse=True)
+            
+            return {
+                'success': True,
+                'trans_code_breakdown': sorted_stats,
+                'summary': {
+                    'total_trans_codes': len(trans_code_stats),
+                    'total_trades': len(trades),
+                    'most_active_code': sorted_stats[0]['trans_code'] if sorted_stats else None,
+                    'highest_volume_code': sorted_stats[0]['trans_code'] if sorted_stats else None
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in transaction code analytics: {str(e)}")
+            return {'success': False, 'message': str(e)}

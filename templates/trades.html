@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Trading History - Mantri Trade Book{% endblock %}
+{% block title %}Trading History - Trade Book{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
@@ -49,6 +49,16 @@
                 <option value="sell">Sell Only</option>
             </select>
         </div>
+        <div class="col-md-2">
+            <label for="transCodeFilter" class="form-label">Trans Code</label>
+            <select class="form-select" id="transCodeFilter" onchange="applyFilters()">
+                <option value="">All Codes</option>
+                <option value="BTO">BTO</option>
+                <option value="STO">STO</option>
+                <option value="BTC">BTC</option>
+                <option value="STC">STC</option>
+            </select>
+        </div>
         <div class="col-md-3">
             <label for="searchSymbol" class="form-label">Search Symbol</label>
             <input type="text" class="form-control search-box" id="searchSymbol" 
@@ -61,6 +71,7 @@
                 <option value="symbol">Symbol</option>
                 <option value="amount">Amount</option>
                 <option value="quantity">Quantity</option>
+                <option value="trans_code">Trans Code</option>
             </select>
         </div>
     </div>
@@ -124,24 +135,27 @@
                 <table class="table table-hover" id="tradesTable">
                     <thead>
                         <tr>
-                            <th onclick="sortTable('date')">Date/Time <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('date')">Activity Date <i class="fas fa-sort"></i></th>
                             <th onclick="sortTable('symbol')">Symbol <i class="fas fa-sort"></i></th>
                             <th onclick="sortTable('account')">Account <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('trans_code')">Trans Code <i class="fas fa-sort"></i></th>
                             <th onclick="sortTable('side')">Side <i class="fas fa-sort"></i></th>
                             <th onclick="sortTable('type')">Type <i class="fas fa-sort"></i></th>
                             <th onclick="sortTable('quantity')">Quantity <i class="fas fa-sort"></i></th>
                             <th onclick="sortTable('price')">Price <i class="fas fa-sort"></i></th>
                             <th onclick="sortTable('amount')">Total Amount <i class="fas fa-sort"></i></th>
-                            <th onclick="sortTable('fees')">Fees <i class="fas fa-sort"></i></th>
+                            <th onclick="sortTable('source')">Source <i class="fas fa-sort"></i></th>
                             <th>Details</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for trade in trades %}
-                        <tr class="trade-row" data-symbol="{{ trade.symbol }}" data-side="{{ trade.side }}" data-account="{{ trade.account_id }}">
+                        <tr class="trade-row" data-symbol="{{ trade.symbol }}" data-side="{{ trade.side }}" data-account="{{ trade.account_id }}" data-trans-code="{{ trade.trans_code }}">
                             <td>
-                                <div>{{ trade.executed_at.strftime('%m/%d/%Y') }}</div>
-                                <div class="small text-muted">{{ trade.executed_at.strftime('%H:%M:%S') }}</div>
+                                <div>{{ trade.activity_date.strftime('%m/%d/%Y') if trade.activity_date else trade.executed_at.strftime('%m/%d/%Y') }}</div>
+                                {% if trade.process_date and trade.process_date != trade.activity_date %}
+                                    <div class="small text-muted">Processed: {{ trade.process_date.strftime('%m/%d') }}</div>
+                                {% endif %}
                             </td>
                             <td>
                                 <div class="d-flex align-items-center">
@@ -155,8 +169,23 @@
                                         ${{ trade.strike_price }} {{ trade.expiration_date.strftime('%m/%d') if trade.expiration_date else '' }}
                                     </div>
                                 {% endif %}
+                                {% if trade.description %}
+                                    <div class="small text-muted" title="{{ trade.description }}">
+                                        {{ trade.description[:30] }}{% if trade.description|length > 30 %}...{% endif %}
+                                    </div>
+                                {% endif %}
                             </td>
-                            <td>{{ trade.account.name }}</td>
+                            <td>
+                                <div>{{ trade.account.name }}</div>
+                                <div class="small text-muted">{{ trade.account.provider.title() }}</div>
+                            </td>
+                            <td>
+                                {% if trade.trans_code %}
+                                    <span class="badge bg-secondary">{{ trade.trans_code }}</span>
+                                {% else %}
+                                    <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
                             <td>
                                 <span class="badge bg-{{ 'success' if trade.side == 'buy' else 'danger' }}">
                                     <i class="fas fa-{{ 'arrow-up' if trade.side == 'buy' else 'arrow-down' }} me-1"></i>
@@ -173,7 +202,11 @@
                             <td>
                                 <strong>{{ "${:,.2f}".format(trade.total_amount or 0) }}</strong>
                             </td>
-                            <td>{{ "${:,.2f}".format(trade.fees or 0) }}</td>
+                            <td>
+                                <span class="badge bg-{{ 'info' if trade.import_source == 'csv_import' else 'secondary' }}">
+                                    {{ 'CSV' if trade.import_source == 'csv_import' else 'API' }}
+                                </span>
+                            </td>
                             <td>
                                 <button class="btn btn-sm btn-outline-info" onclick="viewTradeDetails({{ trade.id }})">
                                     <i class="fas fa-info-circle"></i>

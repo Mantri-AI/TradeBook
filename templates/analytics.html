@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Analytics - Mantri Trade Book{% endblock %}
+{% block title %}Analytics - Trade Book{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
@@ -10,16 +10,1340 @@
             <button type="button" class="btn btn-sm btn-outline-secondary" onclick="refreshAnalytics()">
                 <i class="fas fa-sync-alt me-1"></i>Refresh
             </button>
-            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="generateReport()">
-                <i class="fas fa-file-pdf me-1"></i>Generate Report
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="exportAnalytics()">
+                <i class="fas fa-download me-1"></i>Export Data
             </button>
         </div>
     </div>
 </div>
 
-<!-- Analytics Dashboard -->
+<!-- Filters Section -->
+<div class="filter-section mb-4">
+    <div class="card">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label for="accountsFilter" class="form-label">Accounts</label>
+                    <select class="form-select" id="accountsFilter" multiple>
+                        <!-- Populated dynamically -->
+                    </select>
+                    <div class="form-text">Select accounts to include</div>
+                </div>
+                <div class="col-md-3">
+                    <label for="dateRangeFilter" class="form-label">Date Range</label>
+                    <select class="form-select" id="dateRangeFilter" onchange="updateDateRange()">
+                        <option value="30">Last 30 days</option>
+                        <option value="90">Last 90 days</option>
+                        <option value="365" selected>Last year</option>
+                        <option value="all">All time</option>
+                        <option value="custom">Custom range</option>
+                    </select>
+                </div>
+                <div class="col-md-3" id="customDateSection" style="display: none;">
+                    <label for="startDate" class="form-label">Start Date</label>
+                    <input type="date" class="form-control" id="startDate">
+                </div>
+                <div class="col-md-3" id="customDateSection2" style="display: none;">
+                    <label for="endDate" class="form-label">End Date</label>
+                    <input type="date" class="form-control" id="endDate">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">&nbsp;</label>
+                    <button type="button" class="btn btn-primary d-block" onclick="applyFilters()">
+                        <i class="fas fa-filter me-2"></i>Apply Filters
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Analytics Tabs -->
+<ul class="nav nav-tabs" id="analyticsTab" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="overview-tab" data-bs-toggle="tab" data-bs-target="#overview" type="button" role="tab">
+            <i class="fas fa-tachometer-alt me-2"></i>Overview
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="pnl-tab" data-bs-toggle="tab" data-bs-target="#pnl" type="button" role="tab">
+            <i class="fas fa-chart-line me-2"></i>P&L Analysis
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="instruments-tab" data-bs-toggle="tab" data-bs-target="#instruments" type="button" role="tab">
+            <i class="fas fa-chart-pie me-2"></i>Instruments
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="transactions-tab" data-bs-toggle="tab" data-bs-target="#transactions" type="button" role="tab">
+            <i class="fas fa-exchange-alt me-2"></i>Transaction Codes
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="accounts-tab" data-bs-toggle="tab" data-bs-target="#accounts" type="button" role="tab">
+            <i class="fas fa-users me-2"></i>Cross-Account
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content" id="analyticsTabContent">
+    <!-- Overview Tab -->
+    <div class="tab-pane fade show active" id="overview" role="tabpanel">
+        <div class="row mt-4">
+            <!-- Summary Cards -->
+            <div class="col-md-3">
+                <div class="card metric-card">
+                    <div class="card-body text-center">
+                        <i class="fas fa-chart-line fa-2x text-success mb-2"></i>
+                        <h4 id="totalPnL">$0.00</h4>
+                        <p class="text-muted">Total P&L</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card metric-card">
+                    <div class="card-body text-center">
+                        <i class="fas fa-exchange-alt fa-2x text-primary mb-2"></i>
+                        <h4 id="totalTrades">0</h4>
+                        <p class="text-muted">Total Trades</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card metric-card">
+                    <div class="card-body text-center">
+                        <i class="fas fa-coins fa-2x text-info mb-2"></i>
+                        <h4 id="uniqueSymbols">0</h4>
+                        <p class="text-muted">Unique Symbols</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card metric-card">
+                    <div class="card-body text-center">
+                        <i class="fas fa-users fa-2x text-warning mb-2"></i>
+                        <h4 id="activeAccounts">0</h4>
+                        <p class="text-muted">Active Accounts</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="row mt-4">
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">P&L Over Time</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="pnlOverTimeChart" height="100"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Top Instruments</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="topInstrumentsChart" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- P&L Analysis Tab -->
+    <div class="tab-pane fade" id="pnl" role="tabpanel">
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0">P&L Analysis</h5>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-secondary" onclick="switchPnLView('daily')">Daily</button>
+                            <button class="btn btn-outline-secondary active" onclick="switchPnLView('monthly')">Monthly</button>
+                            <button class="btn btn-outline-secondary" onclick="switchPnLView('cumulative')">Cumulative</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="pnlAnalysisChart" height="80"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">P&L Summary</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="pnlSummaryTable">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Monthly Breakdown</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="monthlyBreakdown">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Instruments Tab -->
+    <div class="tab-pane fade" id="instruments" role="tabpanel">
+        <div class="row mt-4">
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Select Instrument</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="symbolSearch" class="form-label">Search Symbol</label>
+                            <input type="text" class="form-control" id="symbolSearch" placeholder="Enter symbol..." onchange="loadInstrumentAnalytics()">
+                        </div>
+                        <div class="mb-3">
+                            <label for="symbolSelect" class="form-label">Or select from list</label>
+                            <select class="form-select" id="symbolSelect" onchange="selectSymbol()">
+                                <option value="">Choose a symbol...</option>
+                                <!-- Populated dynamically -->
+                            </select>
+                        </div>
+                        <button class="btn btn-primary" onclick="loadInstrumentAnalytics()">
+                            <i class="fas fa-search me-2"></i>Analyze
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0" id="instrumentTitle">Instrument Analysis</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="instrumentAnalysisContent">
+                            <div class="text-center text-muted py-5">
+                                <i class="fas fa-chart-bar fa-3x mb-3"></i>
+                                <p>Select an instrument to view detailed analytics</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Transaction Codes Tab -->
+    <div class="tab-pane fade" id="transactions" role="tabpanel">
+        <div class="row mt-4">
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Transaction Code Analysis</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-striped" id="transCodeTable">
+                                <thead>
+                                    <tr>
+                                        <th>Code</th>
+                                        <th>Count</th>
+                                        <th>Total Amount</th>
+                                        <th>Avg Price</th>
+                                        <th>Symbols</th>
+                                        <th>Date Range</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Populated dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Transaction Code Distribution</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="transCodeChart" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cross-Account Tab -->
+    <div class="tab-pane fade" id="accounts" role="tabpanel">
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Cross-Account Analysis</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-striped" id="crossAccountTable">
+                                <thead>
+                                    <tr>
+                                        <th>Account</th>
+                                        <th>Total Trades</th>
+                                        <th>Total Volume</th>
+                                        <th>Buy Volume</th>
+                                        <th>Sell Volume</th>
+                                        <th>Unique Symbols</th>
+                                        <th>Performance</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Populated dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-4">
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Account Volume Distribution</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="accountVolumeChart" height="150"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Account Performance Comparison</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="accountPerformanceChart" height="150"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .metric-card {
+        transition: transform 0.2s ease;
+        border-left: 4px solid #007bff;
+    }
+    
+    .metric-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }
+    
+    .filter-section .card {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+    }
+    
+    .chart-container {
+        position: relative;
+        height: 400px;
+    }
+    
+    .nav-tabs .nav-link {
+        color: #6c757d;
+        border: none;
+        border-bottom: 2px solid transparent;
+        background: none;
+    }
+    
+    .nav-tabs .nav-link.active,
+    .nav-tabs .nav-link:hover {
+        color: #007bff;
+        border-bottom-color: #007bff;
+        background: none;
+    }
+    
+    .table th {
+        background-color: #f8f9fa;
+        border-top: none;
+        font-weight: 600;
+    }
+    
+    .btn-group .btn.active {
+        background-color: #007bff;
+        border-color: #007bff;
+        color: white;
+    }
+    
+    .risk-metric {
+        padding: 8px 0;
+        border-bottom: 1px solid #f0f0f0;
+    }
+    
+    .risk-metric:last-child {
+        border-bottom: none;
+    }
+    
+    .metric-small {
+        text-align: center;
+    }
+    
+    .metric-small .metric-value {
+        font-size: 1.5rem;
+        font-weight: 700;
+        margin-bottom: 5px;
+    }
+    
+    .metric-small .metric-label {
+        font-size: 0.75rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    .chart-container {
+        position: relative;
+        height: 300px;
+    }
+    
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 15px;
+    }
+    
+    @media (max-width: 768px) {
+        .stats-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    let charts = {};
+    let currentFilters = {
+        account_ids: null,
+        start_date: null,
+        end_date: null
+    };
+    
+    let performanceChart, allocationChart, sectorChart, tradingChart, optionsChart, analysisChart;
+
+    $(document).ready(function() {
+        loadAccounts();
+        loadAnalytics();
+        initializeAllCharts();
+        loadAnalyticsData();
+    });
+
+    function loadAccounts() {
+        fetch('/api/accounts')
+            .then(response => response.json())
+            .then(accounts => {
+                const accountsFilter = $('#accountsFilter');
+                accountsFilter.empty();
+                
+                accounts.forEach(account => {
+                    accountsFilter.append(`<option value="${account.id}">${account.name} (${account.provider})</option>`);
+                });
+            })
+            .catch(error => {
+                console.error('Error loading accounts:', error);
+            });
+    }
+
+    function updateDateRange() {
+        const range = $('#dateRangeFilter').val();
+        
+        if (range === 'custom') {
+            $('#customDateSection').show();
+            $('#customDateSection2').show();
+        } else {
+            $('#customDateSection').hide();
+            $('#customDateSection2').hide();
+            
+            const endDate = new Date();
+            let startDate = new Date();
+            
+            switch (range) {
+                case '30':
+                    startDate.setDate(endDate.getDate() - 30);
+                    break;
+                case '90':
+                    startDate.setDate(endDate.getDate() - 90);
+                    break;
+                case '365':
+                    startDate.setFullYear(endDate.getFullYear() - 1);
+                    break;
+                case 'all':
+                    startDate = null;
+                    break;
+            }
+            
+            currentFilters.start_date = startDate ? startDate.toISOString().split('T')[0] : null;
+            currentFilters.end_date = endDate.toISOString().split('T')[0];
+        }
+    }
+
+    function applyFilters() {
+        const selectedAccounts = $('#accountsFilter').val();
+        currentFilters.account_ids = selectedAccounts.length > 0 ? selectedAccounts.join(',') : null;
+        
+        const range = $('#dateRangeFilter').val();
+        if (range === 'custom') {
+            currentFilters.start_date = $('#startDate').val();
+            currentFilters.end_date = $('#endDate').val();
+        }
+        
+        loadAnalytics();
+    }
+
+    function loadAnalytics() {
+        // Load overview data
+        loadPnLOverTime();
+        loadTransCodeAnalytics();
+        loadCrossAccountAnalytics();
+        loadSymbolsList();
+        updateSummaryCards();
+    }
+
+    function loadPnLOverTime() {
+        const params = new URLSearchParams();
+        if (currentFilters.account_ids) params.append('account_ids', currentFilters.account_ids);
+        if (currentFilters.start_date) params.append('start_date', currentFilters.start_date);
+        if (currentFilters.end_date) params.append('end_date', currentFilters.end_date);
+        
+        fetch(`/api/analytics/pnl-over-time?${params}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updatePnLCharts(data);
+                    updateSummaryCards(data.summary);
+                }
+            })
+            .catch(error => {
+                console.error('Error loading P&L data:', error);
+            });
+    }
+
+    function loadTransCodeAnalytics() {
+        const params = new URLSearchParams();
+        if (currentFilters.account_ids) params.append('account_ids', currentFilters.account_ids);
+        
+        fetch(`/api/analytics/trans-codes?${params}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updateTransCodeTable(data.trans_code_breakdown);
+                    updateTransCodeChart(data.trans_code_breakdown);
+                }
+            })
+            .catch(error => {
+                console.error('Error loading transaction code data:', error);
+            });
+    }
+
+    function loadCrossAccountAnalytics() {
+        const params = new URLSearchParams();
+        if (currentFilters.account_ids) params.append('account_ids', currentFilters.account_ids);
+        
+        fetch(`/api/analytics/cross-account?${params}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updateCrossAccountTable(data.accounts_data);
+                    updateAccountCharts(data.accounts_data);
+                }
+            })
+            .catch(error => {
+                console.error('Error loading cross-account data:', error);
+            });
+    }
+
+    function loadSymbolsList() {
+        const params = new URLSearchParams();
+        if (currentFilters.account_ids) params.append('account_ids', currentFilters.account_ids);
+        
+        fetch(`/api/analytics/symbols?${params}`)
+            .then(response => response.json())
+            .then(data => {
+                const symbolSelect = $('#symbolSelect');
+                symbolSelect.empty();
+                symbolSelect.append('<option value="">Choose a symbol...</option>');
+                
+                data.symbols.forEach(symbol => {
+                    symbolSelect.append(`<option value="${symbol}">${symbol}</option>`);
+                });
+            })
+            .catch(error => {
+                console.error('Error loading symbols:', error);
+            });
+    }
+
+    function loadInstrumentAnalytics() {
+        const symbol = $('#symbolSearch').val() || $('#symbolSelect').val();
+        
+        if (!symbol) {
+            showError('Please enter or select a symbol');
+            return;
+        }
+        
+        const params = new URLSearchParams();
+        if (currentFilters.account_ids) params.append('account_ids', currentFilters.account_ids);
+        
+        fetch(`/api/analytics/instrument/${symbol}?${params}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updateInstrumentAnalysis(data);
+                } else {
+                    showError(data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error loading instrument data:', error);
+            });
+    }
+
+    function selectSymbol() {
+        const symbol = $('#symbolSelect').val();
+        $('#symbolSearch').val(symbol);
+    }
+
+    // Chart update functions
+    function updatePnLCharts(data) {
+        // Destroy existing charts
+        if (charts.pnlOverTime) charts.pnlOverTime.destroy();
+        if (charts.pnlAnalysis) charts.pnlAnalysis.destroy();
+        
+        // P&L Over Time Chart (Overview tab)
+        const ctx1 = document.getElementById('pnlOverTimeChart').getContext('2d');
+        charts.pnlOverTime = new Chart(ctx1, {
+            type: 'line',
+            data: {
+                labels: data.daily_data.map(d => d.date),
+                datasets: [{
+                    label: 'Cumulative P&L',
+                    data: data.daily_data.map(d => d.cumulative_pnl),
+                    borderColor: 'rgb(75, 192, 192)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return '$' + value.toFixed(2);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        // P&L Analysis Chart (P&L tab)
+        const ctx2 = document.getElementById('pnlAnalysisChart').getContext('2d');
+        charts.pnlAnalysis = new Chart(ctx2, {
+            type: 'bar',
+            data: {
+                labels: data.monthly_data.map(d => d.month),
+                datasets: [{
+                    label: 'Monthly P&L',
+                    data: data.monthly_data.map(d => d.monthly_pnl),
+                    backgroundColor: data.monthly_data.map(d => d.monthly_pnl >= 0 ? 'rgba(75, 192, 192, 0.6)' : 'rgba(255, 99, 132, 0.6)'),
+                    borderColor: data.monthly_data.map(d => d.monthly_pnl >= 0 ? 'rgb(75, 192, 192)' : 'rgb(255, 99, 132)'),
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return '$' + value.toFixed(2);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function updateTransCodeTable(transCodeData) {
+        const tbody = $('#transCodeTable tbody');
+        tbody.empty();
+        
+        transCodeData.forEach(item => {
+            tbody.append(`
+                <tr>
+                    <td><span class="badge bg-primary">${item.trans_code}</span></td>
+                    <td>${item.count}</td>
+                    <td>$${item.total_amount.toFixed(2)}</td>
+                    <td>$${item.avg_price.toFixed(2)}</td>
+                    <td>${item.unique_symbols}</td>
+                    <td>${item.date_range.start} to ${item.date_range.end}</td>
+                </tr>
+            `);
+        });
+    }
+
+    function updateTransCodeChart(transCodeData) {
+        if (charts.transCode) charts.transCode.destroy();
+        
+        const ctx = document.getElementById('transCodeChart').getContext('2d');
+        charts.transCode = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: transCodeData.map(item => item.trans_code),
+                datasets: [{
+                    data: transCodeData.map(item => item.total_amount),
+                    backgroundColor: [
+                        '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0',
+                        '#9966FF', '#FF9F40', '#FF6384', '#C9CBCF'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    }
+                }
+            }
+        });
+    }
+
+    function updateCrossAccountTable(accountsData) {
+        const tbody = $('#crossAccountTable tbody');
+        tbody.empty();
+        
+        Object.entries(accountsData).forEach(([accountName, data]) => {
+            const performance = ((data.sell_volume - data.buy_volume) / data.buy_volume * 100).toFixed(2);
+            tbody.append(`
+                <tr>
+                    <td><strong>${accountName}</strong></td>
+                    <td>${data.trades.length}</td>
+                    <td>$${data.total_volume.toFixed(2)}</td>
+                    <td>$${data.buy_volume.toFixed(2)}</td>
+                    <td>$${data.sell_volume.toFixed(2)}</td>
+                    <td>${data.unique_symbols}</td>
+                    <td><span class="badge ${performance >= 0 ? 'bg-success' : 'bg-danger'}">${performance}%</span></td>
+                </tr>
+            `);
+        });
+    }
+
+    function updateAccountCharts(accountsData) {
+        // Account Volume Chart
+        if (charts.accountVolume) charts.accountVolume.destroy();
+        
+        const ctx1 = document.getElementById('accountVolumeChart').getContext('2d');
+        charts.accountVolume = new Chart(ctx1, {
+            type: 'bar',
+            data: {
+                labels: Object.keys(accountsData),
+                datasets: [{
+                    label: 'Total Volume',
+                    data: Object.values(accountsData).map(data => data.total_volume),
+                    backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                    borderColor: 'rgb(54, 162, 235)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return '$' + value.toFixed(0);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function updateInstrumentAnalysis(data) {
+        $('#instrumentTitle').text(`${data.symbol} Analysis`);
+        
+        const content = `
+            <div class="row">
+                <div class="col-md-6">
+                    <h6>Trading Summary</h6>
+                    <ul class="list-unstyled">
+                        <li><strong>Total Trades:</strong> ${data.total_trades}</li>
+                        <li><strong>Date Range:</strong> ${data.date_range.start} to ${data.date_range.end}</li>
+                        <li><strong>Net Position:</strong> ${data.quantity_metrics.net_position}</li>
+                        <li><strong>Accounts:</strong> ${data.accounts_involved.join(', ')}</li>
+                    </ul>
+                </div>
+                <div class="col-md-6">
+                    <h6>P&L Summary</h6>
+                    <ul class="list-unstyled">
+                        <li><strong>Realized P&L:</strong> <span class="${data.pnl_metrics.realized_pnl >= 0 ? 'text-success' : 'text-danger'}">$${data.pnl_metrics.realized_pnl}</span></li>
+                        <li><strong>P&L %:</strong> <span class="${data.pnl_metrics.pnl_percentage >= 0 ? 'text-success' : 'text-danger'}">${data.pnl_metrics.pnl_percentage}%</span></li>
+                        <li><strong>Avg Buy Price:</strong> $${data.price_metrics.avg_buy_price}</li>
+                        <li><strong>Avg Sell Price:</strong> $${data.price_metrics.avg_sell_price}</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="row mt-3">
+                <div class="col-12">
+                    <h6>Transaction Codes</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr><th>Code</th><th>Count</th><th>Amount</th><th>Quantity</th></tr>
+                            </thead>
+                            <tbody>
+                                ${Object.entries(data.trans_code_breakdown).map(([code, stats]) => 
+                                    `<tr><td>${code}</td><td>${stats.count}</td><td>$${stats.total_amount.toFixed(2)}</td><td>${stats.total_quantity}</td></tr>`
+                                ).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        $('#instrumentAnalysisContent').html(content);
+    }
+
+    function updateSummaryCards(summary = null) {
+        if (summary) {
+            $('#totalPnL').text('$' + summary.total_pnl.toFixed(2));
+            $('#totalTrades').text(summary.total_trades);
+            
+            // Update color based on P&L
+            const pnlElement = $('#totalPnL');
+            pnlElement.removeClass('text-success text-danger');
+            pnlElement.addClass(summary.total_pnl >= 0 ? 'text-success' : 'text-danger');
+        }
+    }
+
+    function switchPnLView(view) {
+        // Update button states
+        $('.btn-group button').removeClass('active');
+        event.target.classList.add('active');
+        
+        // Update chart based on view
+        // Implementation depends on the view type
+    }
+
+    function refreshAnalytics() {
+        showLoading();
+        loadAnalytics();
+        hideLoading();
+        showSuccess('Analytics refreshed successfully');
+    }
+
+    function exportAnalytics() {
+        showSuccess('Export functionality coming soon!');
+    }
+    
+    function initializeAllCharts() {
+        // Performance Chart
+        const performanceCtx = document.getElementById('performanceChart').getContext('2d');
+        performanceChart = new Chart(performanceCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Portfolio Value',
+                    data: [],
+                    borderColor: '#3498db',
+                    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                }, {
+                    label: 'Benchmark (SPY)',
+                    data: [],
+                    borderColor: '#95a5a6',
+                    backgroundColor: 'transparent',
+                    fill: false,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    intersect: false,
+                    mode: 'index'
+                },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        ticks: {
+                            callback: function(value) {
+                                return formatCurrency(value);
+                            }
+                        }
+                    }
+                },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ' + formatCurrency(context.parsed.y);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Allocation Chart
+        const allocationCtx = document.getElementById('allocationChart').getContext('2d');
+        allocationChart = new Chart(allocationCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Stocks', 'Options', 'Cash'],
+                datasets: [{
+                    data: [70, 25, 5],
+                    backgroundColor: ['#3498db', '#e74c3c', '#2ecc71']
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.label + ': ' + context.parsed + '%';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Sector Chart
+        const sectorCtx = document.getElementById('sectorChart').getContext('2d');
+        sectorChart = new Chart(sectorCtx, {
+            type: 'bar',
+            data: {
+                labels: ['Technology', 'Finance', 'Healthcare', 'Consumer', 'Energy'],
+                datasets: [{
+                    data: [35, 20, 15, 20, 10],
+                    backgroundColor: ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6']
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return value + '%';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Trading Chart
+        const tradingCtx = document.getElementById('tradingChart').getContext('2d');
+        tradingChart = new Chart(tradingCtx, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Trading Volume',
+                    data: [],
+                    backgroundColor: '#3498db'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return formatCurrency(value);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Options Chart
+        const optionsCtx = document.getElementById('optionsChart').getContext('2d');
+        optionsChart = new Chart(optionsCtx, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: 'Call Options',
+                    data: [],
+                    backgroundColor: 'rgba(46, 204, 113, 0.6)',
+                    borderColor: '#2ecc71'
+                }, {
+                    label: 'Put Options',
+                    data: [],
+                    backgroundColor: 'rgba(231, 76, 60, 0.6)',
+                    borderColor: '#e74c3c'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Days to Expiration'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Strike Price'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return '$' + value;
+                            }
+                        }
+                    }
+                },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': $' + context.parsed.y + 
+                                       ' (' + context.parsed.x + ' days)';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Analysis Chart
+        const analysisCtx = document.getElementById('analysisChart').getContext('2d');
+        analysisChart = new Chart(analysisCtx, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [{
+                    data: [],
+                    backgroundColor: '#3498db'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            }
+        });
+    }
+    
+    function loadAnalyticsData() {
+        // Load portfolio performance data
+        fetch('/api/analytics/performance')
+            .then(response => response.json())
+            .then(data => {
+                updatePerformanceChart(data);
+            })
+            .catch(error => console.error('Error loading performance data:', error));
+        
+        // Load portfolio allocation data
+        fetch('/api/analytics/allocation')
+            .then(response => response.json())
+            .then(data => {
+                updateAllocationChart(data);
+            })
+            .catch(error => console.error('Error loading allocation data:', error));
+        
+        // Load trading analytics
+        fetch('/api/analytics/trading')
+            .then(response => response.json())
+            .then(data => {
+                updateTradingChart(data);
+            })
+            .catch(error => console.error('Error loading trading data:', error));
+        
+        // Load options analytics
+        fetch('/api/analytics/options')
+            .then(response => response.json())
+            .then(data => {
+                updateOptionsAnalytics(data);
+            })
+            .catch(error => console.error('Error loading options data:', error));
+        
+        // Load risk metrics
+        fetch('/api/analytics/risk')
+            .then(response => response.json())
+            .then(data => {
+                updateRiskMetrics(data);
+            })
+            .catch(error => console.error('Error loading risk data:', error));
+    }
+    
+    function updatePerformanceChart(data) {
+        if (data.dates && data.portfolio_values) {
+            performanceChart.data.labels = data.dates;
+            performanceChart.data.datasets[0].data = data.portfolio_values;
+            if (data.benchmark_values) {
+                performanceChart.data.datasets[1].data = data.benchmark_values;
+            }
+            performanceChart.update();
+        }
+    }
+    
+    function updateAllocationChart(data) {
+        if (data.allocation) {
+            allocationChart.data.labels = Object.keys(data.allocation);
+            allocationChart.data.datasets[0].data = Object.values(data.allocation);
+            allocationChart.update();
+        }
+    }
+    
+    function updateTradingChart(data) {
+        if (data.trading_volume) {
+            tradingChart.data.labels = Object.keys(data.trading_volume);
+            tradingChart.data.datasets[0].data = Object.values(data.trading_volume);
+            tradingChart.update();
+        }
+    }
+    
+    function updateOptionsAnalytics(data) {
+        if (data.options_positions) {
+            const calls = data.options_positions.filter(pos => pos.option_type === 'call');
+            const puts = data.options_positions.filter(pos => pos.option_type === 'put');
+            
+            optionsChart.data.datasets[0].data = calls.map(pos => ({
+                x: pos.days_to_expiry,
+                y: pos.strike_price
+            }));
+            
+            optionsChart.data.datasets[1].data = puts.map(pos => ({
+                x: pos.days_to_expiry,
+                y: pos.strike_price
+            }));
+            
+            optionsChart.update();
+        }
+        
+        // Update options summary
+        if (data.summary) {
+            $('#totalOptionsPositions').text(data.summary.total_positions || 0);
+            $('#callsCount').text(data.summary.calls_count || 0);
+            $('#putsCount').text(data.summary.puts_count || 0);
+            $('#expiringThisWeek').text(data.summary.expiring_this_week || 0);
+            $('#itmPositions').text(data.summary.itm_positions || 0);
+            $('#otmPositions').text(data.summary.otm_positions || 0);
+            
+            if (data.summary.greeks) {
+                $('#totalDelta').text((data.summary.greeks.delta || 0).toFixed(2));
+                $('#totalGamma').text((data.summary.greeks.gamma || 0).toFixed(2));
+                $('#totalTheta').text((data.summary.greeks.theta || 0).toFixed(1));
+                $('#totalVega').text((data.summary.greeks.vega || 0).toFixed(1));
+            }
+        }
+    }
+    
+    function updateRiskMetrics(data) {
+        if (data.metrics) {
+            $('#portfolioBeta').text((data.metrics.beta || 0).toFixed(2));
+            $('#sharpeRatio').text((data.metrics.sharpe_ratio || 0).toFixed(2));
+            $('#maxDrawdown').text(formatPercent(data.metrics.max_drawdown || 0));
+            $('#volatility').text(formatPercent(data.metrics.volatility || 0));
+            $('#valueAtRisk').text(formatCurrency(data.metrics.var_95 || 0));
+        }
+        
+        // Update performance stats
+        if (data.performance_stats) {
+            $('#winRate').text(formatPercent(data.performance_stats.win_rate || 0));
+            $('#avgWin').text(formatCurrency(data.performance_stats.avg_win || 0));
+            $('#avgLoss').text(formatCurrency(data.performance_stats.avg_loss || 0));
+            $('#profitFactor').text((data.performance_stats.profit_factor || 0).toFixed(2));
+            $('#totalTrades').text(data.performance_stats.total_trades || 0);
+            $('#avgHoldTime').text((data.performance_stats.avg_hold_time || 0).toFixed(1) + ' days');
+        }
+    }
+    
+    function switchTradingView(viewType) {
+        // Update button states
+        $('.btn-group .btn').removeClass('active');
+        $(`[onclick="switchTradingView('${viewType}')"]`).addClass('active');
+        
+        // Load new data based on view type
+        fetch(`/api/analytics/trading?view=${viewType}`)
+            .then(response => response.json())
+            .then(data => {
+                updateTradingChart(data);
+            })
+            .catch(error => console.error('Error loading trading view:', error));
+    }
+    
+    function updateAnalysis() {
+        const analysisType = $('#analysisType').val();
+        const timeframe = $('#timeframe').val();
+        
+        showLoading();
+        
+        fetch(`/api/analytics/analysis?type=${analysisType}&timeframe=${timeframe}`)
+            .then(response => response.json())
+            .then(data => {
+                hideLoading();
+                updateAnalysisChart(data, analysisType);
+            })
+            .catch(error => {
+                hideLoading();
+                showError('Failed to load analysis data');
+                console.error('Error:', error);
+            });
+    }
+    
+    function updateAnalysisChart(data, analysisType) {
+        switch (analysisType) {
+            case 'concentration':
+                updateConcentrationChart(data);
+                break;
+            case 'correlation':
+                updateCorrelationChart(data);
+                break;
+            case 'returns':
+                updateReturnsChart(data);
+                break;
+            case 'momentum':
+                updateMomentumChart(data);
+                break;
+        }
+    }
+    
+    function updateConcentrationChart(data) {
+        if (data.positions) {
+            analysisChart.config.type = 'bar';
+            analysisChart.data.labels = data.positions.map(p => p.symbol);
+            analysisChart.data.datasets[0].data = data.positions.map(p => p.weight);
+            analysisChart.data.datasets[0].label = 'Position Weight (%)';
+            analysisChart.options.scales.y.ticks.callback = function(value) {
+                return value + '%';
+            };
+            analysisChart.update();
+        }
+    }
+    
+    function updateCorrelationChart(data) {
+        // Implementation for correlation matrix visualization
+        showSuccess('Correlation analysis - Feature in development');
+    }
+    
+    function updateReturnsChart(data) {
+        if (data.returns_distribution) {
+            analysisChart.config.type = 'histogram';
+            // Update chart with returns distribution data
+            analysisChart.update();
+        }
+    }
+    
+    function updateMomentumChart(data) {
+        if (data.momentum_scores) {
+            analysisChart.config.type = 'bar';
+            analysisChart.data.labels = data.momentum_scores.map(m => m.symbol);
+            analysisChart.data.datasets[0].data = data.momentum_scores.map(m => m.score);
+            analysisChart.data.datasets[0].label = 'Momentum Score';
+            analysisChart.update();
+        }
+    }
+    
+    function generateReport() {
+        showLoading();
+        
+        fetch('/api/analytics/report', { method: 'POST' })
+            .then(response => {
+                if (response.ok) {
+                    return response.blob();
+                }
+                throw new Error('Report generation failed');
+            })
+            .then(blob => {
+                hideLoading();
+                
+                // Download the report
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = `portfolio_report_${new Date().toISOString().split('T')[0]}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                
+                showSuccess('Report generated and downloaded successfully');
+            })
+            .catch(error => {
+                hideLoading();
+                showError('Failed to generate report');
+                console.error('Error:', error);
+            });
+    }
+
+    // Initialize date range on load
+    updateDateRange();
+</script>
+{% endblock %}
+<!-- Portfolio Performance Overview -->
 <div class="row">
-    <!-- Portfolio Performance -->
     <div class="col-lg-8">
         <div class="card mb-4">
             <div class="card-header">
@@ -280,58 +1604,7 @@
     </div>
 </div>
 
-{% endblock %}
-
-{% block extra_css %}
-<style>
-    .risk-metric {
-        padding: 8px 0;
-        border-bottom: 1px solid #f0f0f0;
-    }
-    
-    .risk-metric:last-child {
-        border-bottom: none;
-    }
-    
-    .metric-small {
-        text-align: center;
-    }
-    
-    .metric-small .metric-value {
-        font-size: 1.5rem;
-        font-weight: 700;
-        margin-bottom: 5px;
-    }
-    
-    .metric-small .metric-label {
-        font-size: 0.75rem;
-        color: #6c757d;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-    
-    .chart-container {
-        position: relative;
-        height: 300px;
-    }
-    
-    .stats-grid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 15px;
-    }
-    
-    @media (max-width: 768px) {
-        .stats-grid {
-            grid-template-columns: 1fr;
-        }
-    }
-</style>
-{% endblock %}
-
-{% block extra_js %}
 <script>
-    let performanceChart, allocationChart, sectorChart, tradingChart, optionsChart, analysisChart;
     
     $(document).ready(function() {
         initializeAllCharts();
@@ -806,4 +2079,3 @@
             });
     }
 </script>
-{% endblock %}

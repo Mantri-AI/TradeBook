@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Accounts - Mantri Trade Book{% endblock %}
+{% block title %}Accounts - Trade Book{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
@@ -95,6 +95,9 @@
                                                     <i class="fas fa-pause"></i>
                                                 </button>
                                             {% endif %}
+                                            <button class="btn btn-outline-info import-csv-btn" data-account-id="{{ account.id }}" data-account-name="{{ account.name }}" title="Import CSV Data">
+                                                <i class="fas fa-file-csv"></i>
+                                            </button>
                                             <button class="btn btn-outline-danger delete-account-btn" data-account-id="{{ account.id }}" title="Delete Account">
                                                 <i class="fas fa-trash"></i>
                                             </button>
@@ -126,7 +129,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="addAccountModalLabel">
-                    <i class="fas fa-plus me-2"></i>Add Robinhood Account
+                    <i class="fas fa-plus me-2"></i>Add Trading Account
                 </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
@@ -134,7 +137,7 @@
                 <div class="modal-body">
                     <div class="alert alert-info">
                         <i class="fas fa-info-circle me-2"></i>
-                        <strong>Security Notice:</strong> Your credentials are encrypted and stored securely. We use industry-standard encryption to protect your login information.
+                        <strong>Security Notice:</strong> Your credentials are encrypted and stored securely. You can also create accounts without authentication for manual data entry.
                     </div>
                     
                     <div class="row">
@@ -148,53 +151,102 @@
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="username" class="form-label">Robinhood Username *</label>
-                                <input type="email" class="form-control" id="username" name="username" required 
-                                       placeholder="your-email@example.com">
+                                <label for="provider" class="form-label">Provider *</label>
+                                <select class="form-select" id="provider" name="provider" required onchange="updateProviderFields()">
+                                    <option value="">Select a provider</option>
+                                    <option value="robinhood">Robinhood</option>
+                                    <option value="fidelity">Fidelity</option>
+                                    <option value="webull">WeBull</option>
+                                    <option value="schwab">Charles Schwab</option>
+                                </select>
                             </div>
                         </div>
                     </div>
                     
                     <div class="row">
-                        <div class="col-md-6">
+                        <div class="col-12">
                             <div class="mb-3">
-                                <label for="password" class="form-label">Password *</label>
-                                <div class="input-group">
-                                    <input type="password" class="form-control" id="password" name="password" required>
-                                    <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('password')">
-                                        <i class="fas fa-eye" id="passwordIcon"></i>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="mfaCode" class="form-label">MFA Code (if enabled)</label>
-                                <input type="text" class="form-control" id="mfaCode" name="mfa_code" 
-                                       placeholder="123456" maxlength="6">
-                                <div class="form-text">Enter your 6-digit MFA code if two-factor authentication is enabled</div>
+                                <label for="authType" class="form-label">Authentication Method *</label>
+                                <select class="form-select" id="authType" name="authentication_type" required onchange="toggleAuthFields()">
+                                    <option value="manual">Manual Entry (No API connection)</option>
+                                    <option value="api_auth">API Authentication</option>
+                                </select>
+                                <div class="form-text">Choose manual entry if you want to import data via CSV files</div>
                             </div>
                         </div>
                     </div>
                     
-                    <div class="form-check mb-3">
+                    <div id="authFields" style="display: none;">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="username" class="form-label">Username/Email</label>
+                                    <input type="email" class="form-control" id="username" name="username" 
+                                           placeholder="your-email@example.com">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="password" class="form-label">Password</label>
+                                    <div class="input-group">
+                                        <input type="password" class="form-control" id="password" name="password">
+                                        <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('password')">
+                                            <i class="fas fa-eye" id="passwordIcon"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="mfaCode" class="form-label">MFA Code (if enabled)</label>
+                                    <input type="text" class="form-control" id="mfaCode" name="mfa_code" 
+                                           placeholder="123456" maxlength="6">
+                                    <div class="form-text">Enter your 6-digit MFA code if two-factor authentication is enabled</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="csvImportSection" class="mb-3">
+                        <h6><i class="fas fa-file-csv me-2"></i>CSV Import</h6>
+                        <div class="mb-3">
+                            <label for="csvFile" class="form-label">Import Transaction Data</label>
+                            <input type="file" class="form-control" id="csvFile" accept=".csv" onchange="previewCSV()">
+                            <div class="form-text">Upload a CSV file with transaction data (Robinhood format supported)</div>
+                        </div>
+                        <div id="csvPreview" style="display: none;">
+                            <div class="alert alert-secondary">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span><i class="fas fa-table me-2"></i>CSV Preview</span>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="importCSV()">
+                                        <i class="fas fa-upload me-1"></i>Import Data
+                                    </button>
+                                </div>
+                                <div id="csvPreviewContent" class="mt-2"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="testConnectionSection" class="form-check mb-3" style="display: none;">
                         <input class="form-check-input" type="checkbox" id="testConnection" checked>
                         <label class="form-check-label" for="testConnection">
                             Test connection before saving
                         </label>
                     </div>
                     
-                    <div class="alert alert-warning">
+                    <div id="warningSection" class="alert alert-warning" style="display: none;">
                         <i class="fas fa-exclamation-triangle me-2"></i>
-                        <strong>Important:</strong> Make sure your Robinhood account has API access enabled. Some accounts may require additional verification steps.
+                        <strong>Important:</strong> Make sure your account has API access enabled. Some providers may require additional verification steps.
                     </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-primary" id="testBtn">
+                    <button type="button" class="btn btn-primary" id="testBtn" style="display: none;">
                         <i class="fas fa-flask me-2"></i>Test Connection
                     </button>
-                    <button type="submit" class="btn btn-success" id="saveBtn" disabled>
+                    <button type="submit" class="btn btn-success" id="saveBtn">
                         <i class="fas fa-save me-2"></i>Save Account
                     </button>
                 </div>
@@ -258,6 +310,68 @@
     </div>
 </div>
 
+<!-- Import CSV to Account Modal -->
+<div class="modal fade" id="importToAccountModal" tabindex="-1" aria-labelledby="importToAccountModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="importToAccountModalLabel">
+                    <i class="fas fa-file-csv me-2"></i>Import CSV Data to Account
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="importToAccountForm">
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Import Data:</strong> Upload a CSV file to add trading data to this account. Existing data will be preserved unless you choose to overwrite.
+                    </div>
+                    
+                    <input type="hidden" id="targetAccountId" name="account_id">
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Target Account</label>
+                        <div class="form-control-plaintext">
+                            <strong id="targetAccountName">Account Name</strong>
+                            <div class="small text-muted">CSV data will be imported into this account</div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="accountCsvFile" class="form-label">CSV File *</label>
+                        <input type="file" class="form-control" id="accountCsvFile" accept=".csv" required onchange="previewAccountCSV()">
+                        <div class="form-text">Upload your trading data in CSV format. Supported formats: Robinhood exports, standard trading data with columns for symbol, quantity, price, date.</div>
+                    </div>
+                    
+                    <div id="accountCsvPreview" style="display: none;">
+                        <div class="alert alert-secondary">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span><i class="fas fa-table me-2"></i>Data Preview</span>
+                                <span class="badge bg-info" id="accountCsvRowCount">0 rows detected</span>
+                            </div>
+                            <div id="accountCsvPreviewContent"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="accountOverwriteData" name="overwrite_data">
+                        <label class="form-check-label" for="accountOverwriteData">
+                            Overwrite existing data for this account
+                        </label>
+                        <div class="form-text">If unchecked, duplicate transactions will be skipped</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success" id="accountImportBtn" disabled>
+                        <i class="fas fa-upload me-2"></i>Import Data
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -315,6 +429,18 @@
         $(document).on('click', '.delete-account-btn', function() {
             const accountId = $(this).data('account-id');
             deleteAccount(accountId);
+        });
+
+        $(document).on('click', '.import-csv-btn', function() {
+            const accountId = $(this).data('account-id');
+            const accountName = $(this).data('account-name');
+            openImportToAccountModal(accountId, accountName);
+        });
+
+        // Handle import to account form submission
+        $('#importToAccountForm').on('submit', function(e) {
+            e.preventDefault();
+            importToAccount();
         });
     });
 
@@ -399,7 +525,10 @@
             hideLoading();
             if (data.success) {
                 showSuccess('Account added successfully');
-                $('#addAccountModal').modal('hide');
+                
+                // Use Bootstrap 5 Modal API
+                const addModal = bootstrap.Modal.getInstance(document.getElementById('addAccountModal'));
+                addModal.hide();
                 setTimeout(() => location.reload(), 1000);
             } else {
                 showError(data.message || 'Failed to add account');
@@ -433,18 +562,35 @@
     }
 
     function editAccount(accountId) {
+        console.log('Fetching account for edit, ID:', accountId);
+        
         fetch(`/api/accounts/${accountId}`)
-            .then(response => response.json())
+            .then(response => {
+                console.log('Edit account response status:', response.status);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
             .then(data => {
+                console.log('Edit account data:', data);
+                
+                if (!data.id) {
+                    throw new Error('Invalid account data received');
+                }
+                
                 $('#editAccountId').val(data.id);
-                $('#editAccountName').val(data.name);
-                $('#editUsername').val(data.username);
-                $('#editIsActive').prop('checked', data.is_active);
-                $('#editAccountModal').modal('show');
+                $('#editAccountName').val(data.name || '');
+                $('#editUsername').val(data.username || '');
+                $('#editIsActive').prop('checked', data.is_active || false);
+                
+                // Use Bootstrap 5 Modal API
+                const editModal = new bootstrap.Modal(document.getElementById('editAccountModal'));
+                editModal.show();
             })
             .catch(error => {
-                showError('Failed to load account details');
-                console.error('Error:', error);
+                console.error('Error fetching account for edit:', error);
+                showError('Failed to load account details: ' + error.message);
             });
     }
 
@@ -469,7 +615,10 @@
             hideLoading();
             if (data.success) {
                 showSuccess('Account updated successfully');
-                $('#editAccountModal').modal('hide');
+                
+                // Use Bootstrap 5 Modal API
+                const editModal = bootstrap.Modal.getInstance(document.getElementById('editAccountModal'));
+                editModal.hide();
                 setTimeout(() => location.reload(), 1000);
             } else {
                 showError(data.message || 'Failed to update account');
@@ -483,18 +632,33 @@
     }
 
     function viewAccountDetails(accountId) {
+        console.log('Fetching account details for ID:', accountId);
+        
         fetch(`/api/accounts/${accountId}/details`)
-            .then(response => response.json())
+            .then(response => {
+                console.log('Response status:', response.status);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
             .then(data => {
+                console.log('Account details response:', data);
                 const account = data.account;
                 const summary = data.summary;
+                
+                if (!account) {
+                    throw new Error('Account data not found in response');
+                }
+                
                 const content = `
                     <div class="row">
                         <div class="col-md-6">
                             <h6>Account Information</h6>
                             <table class="table table-sm">
-                                <tr><td><strong>Name:</strong></td><td>${account.name}</td></tr>
-                                <tr><td><strong>Username:</strong></td><td>${account.username}</td></tr>
+                                <tr><td><strong>Name:</strong></td><td>${account.name || 'N/A'}</td></tr>
+                                <tr><td><strong>Username:</strong></td><td>${account.username || 'N/A'}</td></tr>
+                                <tr><td><strong>Provider:</strong></td><td>${account.provider || 'N/A'}</td></tr>
                                 <tr><td><strong>Status:</strong></td><td>
                                     <span class="badge bg-${account.is_active ? 'success' : 'warning'}">
                                         ${account.is_active ? 'Active' : 'Inactive'}
@@ -505,10 +669,10 @@
                         <div class="col-md-6">
                             <h6>Portfolio Information</h6>
                             <table class="table table-sm">
-                                <tr><td><strong>Portfolio Value:</strong></td><td>${formatCurrency(summary.portfolio_value)}</td></tr>
-                                <tr><td><strong>Buying Power:</strong></td><td>${formatCurrency(summary.buying_power)}</td></tr>
-                                <tr><td><strong>Positions:</strong></td><td>${summary.total_positions}</td></tr>
-                                <tr><td><strong>Trades:</strong></td><td>${summary.total_trades}</td></tr>
+                                <tr><td><strong>Portfolio Value:</strong></td><td>${formatCurrency(summary.portfolio_value || 0)}</td></tr>
+                                <tr><td><strong>Buying Power:</strong></td><td>${formatCurrency(summary.buying_power || 0)}</td></tr>
+                                <tr><td><strong>Positions:</strong></td><td>${summary.total_positions || 0}</td></tr>
+                                <tr><td><strong>Trades:</strong></td><td>${summary.total_trades || 0}</td></tr>
                             </table>
                         </div>
                     </div>
@@ -516,18 +680,81 @@
                         <div class="col-12">
                             <h6>Sync Information</h6>
                             <table class="table table-sm">
-                                <tr><td><strong>Created:</strong></td><td>${new Date(account.created_at).toLocaleString()}</td></tr>
+                                <tr><td><strong>Created:</strong></td><td>${account.created_at ? new Date(account.created_at).toLocaleString() : 'N/A'}</td></tr>
                                 <tr><td><strong>Last Sync:</strong></td><td>${account.last_sync ? new Date(account.last_sync).toLocaleString() : 'Never'}</td></tr>
                             </table>
                         </div>
                     </div>
+                    ${data.recent_positions && data.recent_positions.length > 0 ? `
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <h6>Recent Positions</h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Symbol</th>
+                                            <th>Type</th>
+                                            <th>Quantity</th>
+                                            <th>Current Value</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${data.recent_positions.map(pos => `
+                                            <tr>
+                                                <td>${pos.symbol}</td>
+                                                <td>${pos.instrument_type}</td>
+                                                <td>${pos.quantity}</td>
+                                                <td>${formatCurrency(pos.current_value || 0)}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    ` : ''}
+                    ${data.recent_trades && data.recent_trades.length > 0 ? `
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <h6>Recent Trades</h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Symbol</th>
+                                            <th>Side</th>
+                                            <th>Quantity</th>
+                                            <th>Price</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${data.recent_trades.map(trade => `
+                                            <tr>
+                                                <td>${new Date(trade.executed_at).toLocaleDateString()}</td>
+                                                <td>${trade.symbol}</td>
+                                                <td>${trade.side}</td>
+                                                <td>${trade.quantity}</td>
+                                                <td>${formatCurrency(trade.price || 0)}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    ` : ''}
                 `;
                 $('#accountDetailsContent').html(content);
-                $('#accountDetailsModal').modal('show');
+                
+                // Use Bootstrap 5 Modal API
+                const detailsModal = new bootstrap.Modal(document.getElementById('accountDetailsModal'));
+                detailsModal.show();
             })
             .catch(error => {
-                showError('Failed to load account details');
-                console.error('Error:', error);
+                console.error('Error fetching account details:', error);
+                showError('Failed to load account details: ' + error.message);
             });
     }
 
@@ -586,13 +813,324 @@
         }
     }
 
+    // New functions for multi-provider support
+    function updateProviderFields() {
+        const provider = $('#provider').val();
+        const authType = $('#authType').val();
+        
+        if (provider) {
+            updateAuthFieldsVisibility();
+        }
+    }
+
+    function toggleAuthFields() {
+        updateAuthFieldsVisibility();
+    }
+
+    function updateAuthFieldsVisibility() {
+        const authType = $('#authType').val();
+        const provider = $('#provider').val();
+        
+        if (authType === 'api_auth') {
+            $('#authFields').show();
+            $('#testConnectionSection').show();
+            $('#warningSection').show();
+            $('#testBtn').show();
+            $('#username').prop('required', true);
+            $('#password').prop('required', true);
+        } else {
+            $('#authFields').hide();
+            $('#testConnectionSection').hide();
+            $('#warningSection').hide();
+            $('#testBtn').hide();
+            $('#username').prop('required', false);
+            $('#password').prop('required', false);
+            connectionTested = true; // No need to test for manual accounts
+        }
+        
+        // Update warning text based on provider
+        if (provider && authType === 'api_auth') {
+            const warnings = {
+                'robinhood': 'Make sure your Robinhood account has API access enabled.',
+                'fidelity': 'Fidelity API access requires special permissions.',
+                'webull': 'WeBull API is currently in beta.',
+                'schwab': 'Schwab API requires developer account registration.'
+            };
+            $('#warningSection').html(`<i class="fas fa-exclamation-triangle me-2"></i><strong>Important:</strong> ${warnings[provider] || 'Check your provider\'s API documentation.'}`);
+        }
+    }
+
+    function previewCSV() {
+        const fileInput = $('#csvFile')[0];
+        const file = fileInput.files[0];
+        
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const csv = e.target.result;
+                const lines = csv.split('\n').slice(0, 6); // Show first 5 rows + header
+                
+                let table = '<div class="table-responsive"><table class="table table-sm table-striped">';
+                lines.forEach((line, index) => {
+                    if (line.trim()) {
+                        const cells = line.split(',');
+                        table += '<tr>';
+                        cells.forEach(cell => {
+                            const tag = index === 0 ? 'th' : 'td';
+                            table += `<${tag}>${cell.trim()}</${tag}>`;
+                        });
+                        table += '</tr>';
+                    }
+                });
+                table += '</table></div>';
+                
+                $('#csvPreviewContent').html(table);
+                $('#csvPreview').show();
+            };
+            reader.readAsText(file);
+        }
+    }
+
+    function importCSV() {
+        const fileInput = $('#csvFile')[0];
+        const file = fileInput.files[0];
+        const accountName = $('#accountName').val();
+        const provider = $('#provider').val();
+        
+        if (!file || !accountName || !provider) {
+            showError('Please fill in account name, select provider, and choose a CSV file');
+            return;
+        }
+        
+        const formData = new FormData();
+        formData.append('csv_file', file);
+        formData.append('account_name', accountName);
+        formData.append('provider', provider);
+        
+        showLoading();
+        
+        fetch('/api/accounts/import-csv', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            hideLoading();
+            if (data.success) {
+                let message = data.message || `CSV imported successfully!`;
+                if (!data.message && data.imported_count !== undefined) {
+                    // Build custom message if not provided
+                    message = `CSV imported successfully! ${data.imported_count} transactions imported`;
+                    if (data.duplicates_count) {
+                        message += `, ${data.duplicates_count} duplicates skipped`;
+                    }
+                    if (data.skipped_rows) {
+                        message += `, ${data.skipped_rows} empty rows skipped`;
+                    }
+                    message += `.`;
+                }
+                
+                showSuccess(message);
+                
+                // Use Bootstrap 5 Modal API
+                const addModal = bootstrap.Modal.getInstance(document.getElementById('addAccountModal'));
+                addModal.hide();
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showError(data.message || 'Failed to import CSV');
+            }
+        })
+        .catch(error => {
+            hideLoading();
+            showError('Error importing CSV file');
+            console.error('Error:', error);
+        });
+    }
+
+    // Update existing saveAccount function to handle new fields
+    function saveAccount() {
+        const formData = {
+            name: $('#accountName').val(),
+            provider: $('#provider').val(),
+            authentication_type: $('#authType').val(),
+            username: $('#username').val() || null,
+            password: $('#password').val() || null,
+            mfa_code: $('#mfaCode').val() || null
+        };
+
+        showLoading();
+
+        fetch('/api/accounts', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(formData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            hideLoading();
+            if (data.success) {
+                showSuccess('Account added successfully!');
+                
+                // Use Bootstrap 5 Modal API
+                const addModal = bootstrap.Modal.getInstance(document.getElementById('addAccountModal'));
+                addModal.hide();
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showError(data.message || 'Failed to add account');
+            }
+        })
+        .catch(error => {
+            hideLoading();
+            showError('Network error occurred');
+            console.error('Error:', error);
+        });
+    }
+
+    // Update form submission handler
+    $('#addAccountForm').off('submit').on('submit', function(e) {
+        e.preventDefault();
+        const authType = $('#authType').val();
+        
+        if (authType === 'api_auth' && !connectionTested) {
+            showError('Please test the connection before saving the account');
+            return;
+        }
+        saveAccount();
+    });
+
     // Reset form when modal is closed
     $('#addAccountModal').on('hidden.bs.modal', function() {
         $('#addAccountForm')[0].reset();
-        $('#saveBtn').prop('disabled', true);
+        $('#saveBtn').prop('disabled', false);
         $('#testBtn').removeClass('btn-success').addClass('btn-primary')
             .html('<i class="fas fa-flask me-2"></i>Test Connection');
         connectionTested = false;
+        $('#csvPreview').hide();
+        $('#authFields').hide();
+        $('#testConnectionSection').hide();
+        $('#warningSection').hide();
+        $('#testBtn').hide();
+    });
+
+    // Account-specific CSV Import Functions
+    function openImportToAccountModal(accountId, accountName) {
+        $('#targetAccountId').val(accountId);
+        $('#targetAccountName').text(accountName);
+        
+        // Use Bootstrap 5 Modal API
+        const importModal = new bootstrap.Modal(document.getElementById('importToAccountModal'));
+        importModal.show();
+    }
+
+    function previewAccountCSV() {
+        const fileInput = $('#accountCsvFile')[0];
+        const file = fileInput.files[0];
+        
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const csv = e.target.result;
+                const lines = csv.split('\n').filter(line => line.trim());
+                const previewLines = lines.slice(0, 6); // Show first 5 rows + header
+                
+                let table = '<div class="table-responsive"><table class="table table-sm table-striped">';
+                previewLines.forEach((line, index) => {
+                    if (line.trim()) {
+                        const cells = line.split(',').map(cell => cell.trim().replace(/"/g, ''));
+                        table += '<tr>';
+                        cells.forEach(cell => {
+                            const tag = index === 0 ? 'th' : 'td';
+                            table += `<${tag}>${cell}</${tag}>`;
+                        });
+                        table += '</tr>';
+                    }
+                });
+                table += '</table></div>';
+                
+                if (lines.length > 6) {
+                    table += `<div class="text-muted small">... and ${lines.length - 6} more rows</div>`;
+                }
+                
+                $('#accountCsvPreviewContent').html(table);
+                $('#accountCsvRowCount').text(`${lines.length - 1} data rows detected`);
+                $('#accountCsvPreview').show();
+                $('#accountImportBtn').prop('disabled', false);
+            };
+            reader.readAsText(file);
+        } else {
+            $('#accountCsvPreview').hide();
+            $('#accountImportBtn').prop('disabled', true);
+        }
+    }
+
+    function importToAccount() {
+        const fileInput = $('#accountCsvFile')[0];
+        const file = fileInput.files[0];
+        const accountId = $('#targetAccountId').val();
+        const overwriteData = $('#accountOverwriteData').is(':checked');
+        
+        if (!file || !accountId) {
+            showError('Please select a CSV file');
+            return;
+        }
+        
+        const formData = new FormData();
+        formData.append('csv_file', file);
+        formData.append('overwrite_data', overwriteData);
+        
+        showLoading();
+        $('#accountImportBtn').prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-2"></i>Importing...');
+        
+        fetch(`/api/accounts/${accountId}/import-csv`, {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            hideLoading();
+            $('#accountImportBtn').prop('disabled', false).html('<i class="fas fa-upload me-2"></i>Import Data');
+            
+            if (data.success) {
+                let message = data.message || `CSV imported successfully!`;
+                if (!data.message) {
+                    // Build custom message if not provided
+                    if (data.imported_count) {
+                        message = `${data.imported_count} transactions imported`;
+                    }
+                    if (data.duplicates_count) {
+                        message += `, ${data.duplicates_count} duplicates skipped`;
+                    }
+                    if (data.skipped_rows) {
+                        message += `, ${data.skipped_rows} empty rows skipped`;
+                    }
+                    message = `CSV imported successfully! ${message}.`;
+                }
+                
+                showSuccess(message);
+                
+                // Use Bootstrap 5 Modal API
+                const importModal = bootstrap.Modal.getInstance(document.getElementById('importToAccountModal'));
+                importModal.hide();
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showError(data.message || 'Failed to import CSV');
+            }
+        })
+        .catch(error => {
+            hideLoading();
+            $('#accountImportBtn').prop('disabled', false).html('<i class="fas fa-upload me-2"></i>Import Data');
+            showError('Error importing CSV file');
+            console.error('Error:', error);
+        });
+    }
+
+    // Reset account import form when modal is closed
+    $('#importToAccountModal').on('hidden.bs.modal', function() {
+        $('#importToAccountForm')[0].reset();
+        $('#accountCsvPreview').hide();
+        $('#accountImportBtn').prop('disabled', true).html('<i class="fas fa-upload me-2"></i>Import Data');
     });
 </script>
 {% endblock %}
