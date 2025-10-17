@@ -365,6 +365,9 @@
         // Load symbols for filter
         loadSymbolsForFilter();
         
+        // Initialize summary cards
+        updateSummaryCards();
+        
         // Set up real-time updates
         setInterval(updatePrices, 60000); // Update every minute
     });
@@ -403,33 +406,38 @@
     }
 
     function applyFilters() {
+        // Apply all filters client-side for better performance
         const accountId = $('#accountFilter').val();
         const type = $('#typeFilter').val();
-        
-        let url = new URL(window.location);
-        
-        if (accountId) {
-            url.searchParams.set('account_id', accountId);
-        } else {
-            url.searchParams.delete('account_id');
-        }
-        
-        if (type && type !== 'all') {
-            url.searchParams.set('type', type);
-        } else {
-            url.searchParams.delete('type');
-        }
-        
-        window.location.href = url.toString();
-    }
-
-    function filterBySymbol() {
         const selectedSymbol = $('#searchSymbol').val();
         
         if (currentView === 'table') {
             $('#positionsTable tbody tr').each(function() {
-                const symbol = $(this).data('symbol');
-                if (!selectedSymbol || symbol === selectedSymbol) {
+                const rowAccountId = $(this).data('account');
+                const rowType = $(this).data('type');
+                const rowSymbol = $(this).data('symbol');
+                
+                let showRow = true;
+                
+                // Apply account filter
+                if (accountId && rowAccountId != accountId) {
+                    showRow = false;
+                }
+                
+                // Apply type filter
+                if (type && type !== 'all') {
+                    if ((type === 'stocks' && rowType !== 'stock') || 
+                        (type === 'options' && rowType !== 'option')) {
+                        showRow = false;
+                    }
+                }
+                
+                // Apply symbol filter
+                if (selectedSymbol && rowSymbol !== selectedSymbol) {
+                    showRow = false;
+                }
+                
+                if (showRow) {
                     $(this).show();
                 } else {
                     $(this).hide();
@@ -437,8 +445,31 @@
             });
         } else {
             $('#positionCards .position-card').each(function() {
-                const symbol = $(this).data('symbol');
-                if (!selectedSymbol || symbol === selectedSymbol) {
+                const cardAccountId = $(this).data('account');
+                const cardType = $(this).data('type');
+                const cardSymbol = $(this).data('symbol');
+                
+                let showCard = true;
+                
+                // Apply account filter
+                if (accountId && cardAccountId != accountId) {
+                    showCard = false;
+                }
+                
+                // Apply type filter
+                if (type && type !== 'all') {
+                    if ((type === 'stocks' && cardType !== 'stock') || 
+                        (type === 'options' && cardType !== 'option')) {
+                        showCard = false;
+                    }
+                }
+                
+                // Apply symbol filter
+                if (selectedSymbol && cardSymbol !== selectedSymbol) {
+                    showCard = false;
+                }
+                
+                if (showCard) {
                     $(this).closest('.col-xl-4').show();
                 } else {
                     $(this).closest('.col-xl-4').hide();
@@ -447,6 +478,11 @@
         }
         
         updateSummaryCards();
+    }
+
+    function filterBySymbol() {
+        // Use the unified applyFilters function
+        applyFilters();
     }
 
     function sortTable(column) {
@@ -540,12 +576,34 @@
         let totalReturn = 0;
         
         visibleRows.each(function() {
-            // Extract values and sum them up
-            // This is a simplified version - you might need more complex parsing
+            if (currentView === 'table') {
+                // For table view, parse values from table cells
+                const valueText = $(this).find('td:nth-child(7)').text().replace(/[$,]/g, '');
+                const dayChangeText = $(this).find('td:nth-child(8) .badge').text().replace(/[$,+]/g, '');
+                const totalReturnText = $(this).find('td:nth-child(9) .badge').text().replace(/[$,+]/g, '');
+                
+                totalValue += parseFloat(valueText) || 0;
+                totalDayChange += parseFloat(dayChangeText) || 0;
+                totalReturn += parseFloat(totalReturnText) || 0;
+            } else {
+                // For card view, parse values from card elements
+                const valueText = $(this).find('.fw-bold').eq(0).text().replace(/[$,]/g, '');
+                const dayChangeText = $(this).find('.text-success, .text-danger').eq(0).text().replace(/[$,+]/g, '');
+                
+                totalValue += parseFloat(valueText) || 0;
+                totalDayChange += parseFloat(dayChangeText) || 0;
+            }
         });
         
+        // Update summary cards
         $('#totalPositionsCount').text(totalCount);
-        // Update other summary cards as needed
+        $('#totalValue').text(formatCurrency(totalValue));
+        $('#totalDayChange').text(formatCurrency(totalDayChange));
+        $('#totalReturn').text(formatCurrency(totalReturn));
+        
+        // Update colors for change indicators
+        $('#totalDayChange').removeClass('text-success text-danger').addClass(totalDayChange >= 0 ? 'text-success' : 'text-danger');
+        $('#totalReturn').removeClass('text-success text-danger').addClass(totalReturn >= 0 ? 'text-success' : 'text-danger');
     }
 
     function viewPositionDetails(positionId) {
@@ -618,7 +676,7 @@
         // Refresh all account data
         fetch('/api/sync-all', { method: 'POST' })
             .then(response => response.json())
-            .then data => {
+            .then(data => {
                 hideLoading();
                 if (data.success) {
                     showSuccess('Positions refreshed successfully');

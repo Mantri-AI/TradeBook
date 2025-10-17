@@ -381,6 +381,12 @@ class CSVImportService:
         # Map Fidelity action to trans_code and side
         trans_code, side = self._map_fidelity_action(action)
         
+        # Calculate amount with proper sign: negative for buy, positive for sell
+        if side == 'buy':
+            final_amount = -abs(total_amount)  # Negative for buy trades
+        else:
+            final_amount = abs(total_amount)   # Positive for sell trades
+        
         return {
             'account_id': account_id,
             'symbol': clean_symbol,
@@ -393,7 +399,7 @@ class CSVImportService:
             'side': side,
             'quantity': quantity,
             'price': price,
-            'total_amount': abs(total_amount),
+            'total_amount': final_amount,
             'fees': fees,
             'option_type': option_data.get('option_type'),
             'strike_price': option_data.get('strike_price'),
@@ -480,6 +486,12 @@ class CSVImportService:
         # Determine side based on trans code and amount
         side = self._determine_side(trans_code, total_amount)
         
+        # Calculate amount with proper sign: negative for buy, positive for sell
+        if side == 'buy':
+            final_amount = -abs(total_amount)  # Negative for buy trades
+        else:
+            final_amount = abs(total_amount)   # Positive for sell trades
+        
         # Parse options data if applicable
         option_data = self._parse_option_description(description)
         instrument_type = 'option' if option_data['is_option'] else 'stock'
@@ -496,7 +508,7 @@ class CSVImportService:
             'side': side,
             'quantity': quantity,
             'price': price,
-            'total_amount': abs(total_amount),
+            'total_amount': final_amount,
             'fees': 0,  # Robinhood typically doesn't charge fees
             'option_type': option_data.get('option_type'),
             'strike_price': option_data.get('strike_price'),
@@ -743,5 +755,11 @@ class CSVImportService:
         
         # Set executed_at from activity_date
         trade_data['executed_at'] = datetime.combine(trade_data['activity_date'], datetime.min.time())
+        
+        # Apply amount sign logic: negative for buy, positive for sell
+        if trade_data['side'] == 'buy':
+            trade_data['total_amount'] = -abs(trade_data['total_amount'])
+        else:
+            trade_data['total_amount'] = abs(trade_data['total_amount'])
         
         return trade_data

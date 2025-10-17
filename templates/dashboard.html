@@ -59,6 +59,7 @@
 </div>
 
 <!-- Charts Section -->
+ <!--
 <div class="row">
     <div class="col-lg-8">
         <div class="card">
@@ -89,7 +90,7 @@
         </div>
     </div>
 </div>
-
+-->
 <!-- Account Overview -->
 <div class="row mt-4">
     <div class="col-12">
@@ -323,21 +324,33 @@
     function updatePortfolioChart(data) {
         if (data.portfolio_data && data.portfolio_data.length > 0) {
             const symbols = data.portfolio_data.map(item => item.symbol);
-            const values = data.portfolio_data.map(item => item.total_value);
+            const values = data.portfolio_data.map(item => item.total_value || 0);
             
             portfolioChart.data.labels = symbols.slice(0, 10); // Top 10
             portfolioChart.data.datasets[0].data = values.slice(0, 10);
             portfolioChart.update();
+        } else {
+            // Show placeholder when no data
+            portfolioChart.data.labels = ['No Positions'];
+            portfolioChart.data.datasets[0].data = [0];
+            portfolioChart.update();
         }
 
-        // Update performance chart
-        const stockValue = data.portfolio_data
-            .filter(item => item.positions.some(p => p.type === 'stock'))
-            .reduce((sum, item) => sum + item.total_value, 0);
+        // Update performance chart - calculate stock vs option values correctly
+        let stockValue = 0;
+        let optionValue = 0;
         
-        const optionValue = data.portfolio_data
-            .filter(item => item.positions.some(p => p.type === 'option'))
-            .reduce((sum, item) => sum + item.total_value, 0);
+        if (data.portfolio_data && data.portfolio_data.length > 0) {
+            data.portfolio_data.forEach(symbol => {
+                symbol.positions.forEach(position => {
+                    if (position.type === 'stock') {
+                        stockValue += position.current_value || 0;
+                    } else if (position.type === 'option') {
+                        optionValue += position.current_value || 0;
+                    }
+                });
+            });
+        }
 
         performanceChart.data.datasets[0].data = [stockValue, optionValue];
         performanceChart.update();
@@ -432,25 +445,34 @@
     }
 
     function refreshData() {
-        loadPortfolioData();
-        loadRecentActivity();
+        showLoading();
         
-        // Refresh account data
-        $('#accountsTable tr').each(function(index) {
-            if (index > 0) { // Skip header
-                $(this).find('td:last-child .btn-outline-primary').addClass('disabled');
-            }
-        });
-        
-        showSuccess('Data refreshed successfully');
-        
-        setTimeout(() => {
-            $('#accountsTable tr').each(function(index) {
-                if (index > 0) {
-                    $(this).find('td:last-child .btn-outline-primary').removeClass('disabled');
+        // First sync all accounts to get latest data
+        fetch('/api/sync-all', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // After sync, reload portfolio data and activity
+                    loadPortfolioData();
+                    loadRecentActivity();
+                    showSuccess('Data refreshed successfully');
+                } else {
+                    showError(data.message || 'Some accounts failed to sync');
+                    // Still try to load local data
+                    loadPortfolioData();
+                    loadRecentActivity();
                 }
+            })
+            .catch(error => {
+                console.error('Error during refresh:', error);
+                showError('Failed to refresh data');
+                // Still try to load local data
+                loadPortfolioData();
+                loadRecentActivity();
+            })
+            .finally(() => {
+                hideLoading();
             });
-        }, 2000);
     }
 
     function syncAccount(accountId) {

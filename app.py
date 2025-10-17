@@ -673,6 +673,13 @@ def api_create_trade():
         except ValueError as e:
             return jsonify({'success': False, 'message': f'Invalid date format: {str(e)}'}), 400
         
+        # Calculate total amount with proper sign: negative for buy, positive for sell
+        amount = float(data['quantity']) * float(data['price'])
+        if data['side'] == 'buy':
+            total_amount = -abs(amount)  # Negative for buy trades
+        else:
+            total_amount = abs(amount)   # Positive for sell trades
+        
         # Create trade object
         trade = Trade(
             account_id=data['account_id'],
@@ -681,7 +688,7 @@ def api_create_trade():
             side=data['side'],
             quantity=float(data['quantity']),
             price=float(data['price']),
-            total_amount=float(data['quantity']) * float(data['price']),
+            total_amount=total_amount,
             activity_date=activity_date,
             executed_at=executed_at,
             trans_code=data['trans_code'],
@@ -744,9 +751,13 @@ def api_update_trade(trade_id):
         if 'instrument_type' in data:
             trade.instrument_type = data['instrument_type']
         
-        # Recalculate total amount
-        if 'quantity' in data or 'price' in data:
-            trade.total_amount = trade.quantity * trade.price
+        # Recalculate total amount with proper sign
+        if 'quantity' in data or 'price' in data or 'side' in data:
+            amount = trade.quantity * trade.price
+            if trade.side == 'buy':
+                trade.total_amount = -abs(amount)  # Negative for buy trades
+            else:
+                trade.total_amount = abs(amount)   # Positive for sell trades
         
         # Handle dates
         if 'activity_date' in data:
