@@ -214,7 +214,7 @@
                         <div class="mb-3">
                             <label for="csvFile" class="form-label">Import Transaction Data</label>
                             <input type="file" class="form-control" id="csvFile" accept=".csv" onchange="previewCSV()">
-                            <div class="form-text">Upload a CSV file with transaction data (Robinhood format supported)</div>
+                            <div class="form-text">Upload a CSV file with transaction data (Robinhood and Fidelity formats supported)</div>
                         </div>
                         <div id="csvPreview" style="display: none;">
                             <div class="alert alert-secondary">
@@ -377,26 +377,70 @@
 {% block extra_js %}
 <script>
     let connectionTested = false;
+    let activeRequests = new Set(); // Track active API requests to prevent duplicates
+
+    // Helper function to generate unique request ID
+    function generateRequestId() {
+        return Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    }
+
+    // Helper function to check if request is already in progress
+    function isRequestInProgress(endpoint, method = 'POST') {
+        const requestKey = `${method}:${endpoint}`;
+        return activeRequests.has(requestKey);
+    }
+
+    // Helper function to add request to tracking
+    function addActiveRequest(endpoint, method = 'POST') {
+        const requestKey = `${method}:${endpoint}`;
+        activeRequests.add(requestKey);
+        return requestKey;
+    }
+
+    // Helper function to remove request from tracking
+    function removeActiveRequest(requestKey) {
+        activeRequests.delete(requestKey);
+    }
 
     $(document).ready(function() {
-        // Handle add account form submission
-        $('#addAccountForm').on('submit', function(e) {
+        // Handle add account form submission - prevent multiple submissions
+        $('#addAccountForm').off('submit').on('submit', function(e) {
             e.preventDefault();
-            if (!connectionTested) {
+            
+            // Prevent multiple submissions
+            if ($(this).data('submitting')) {
+                return false;
+            }
+            
+            const authType = $('#authType').val();
+            if (authType === 'api_auth' && !connectionTested) {
                 showError('Please test the connection before saving the account');
                 return;
             }
+            
+            $(this).data('submitting', true);
             saveAccount();
         });
 
         // Handle edit account form submission
-        $('#editAccountForm').on('submit', function(e) {
+        $('#editAccountForm').off('submit').on('submit', function(e) {
             e.preventDefault();
+            
+            // Prevent multiple submissions
+            if ($(this).data('submitting')) {
+                return false;
+            }
+            
+            $(this).data('submitting', true);
             updateAccount();
         });
 
         // Handle test connection button click
-        $('#testBtn').on('click', function() {
+        $('#testBtn').off('click').on('click', function() {
+            // Prevent multiple clicks
+            if ($(this).prop('disabled')) {
+                return;
+            }
             testConnection();
         });
 
@@ -438,8 +482,15 @@
         });
 
         // Handle import to account form submission
-        $('#importToAccountForm').on('submit', function(e) {
+        $('#importToAccountForm').off('submit').on('submit', function(e) {
             e.preventDefault();
+            
+            // Prevent multiple submissions
+            if ($(this).data('submitting')) {
+                return false;
+            }
+            
+            $(this).data('submitting', true);
             importToAccount();
         });
     });
@@ -601,6 +652,12 @@
             is_active: $('#editIsActive').is(':checked')
         };
 
+        const form = $('#editAccountForm');
+        const submitBtn = form.find('button[type="submit"]');
+        
+        // Disable button to prevent multiple clicks
+        submitBtn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-2"></i>Saving...');
+        
         showLoading();
 
         fetch(`/api/accounts/${accountId}`, {
@@ -613,6 +670,8 @@
         .then(response => response.json())
         .then(data => {
             hideLoading();
+            form.data('submitting', false); // Reset submission flag
+            
             if (data.success) {
                 showSuccess('Account updated successfully');
                 
@@ -622,10 +681,13 @@
                 setTimeout(() => location.reload(), 1000);
             } else {
                 showError(data.message || 'Failed to update account');
+                submitBtn.prop('disabled', false).html('Save Changes');
             }
         })
         .catch(error => {
             hideLoading();
+            form.data('submitting', false); // Reset submission flag
+            submitBtn.prop('disabled', false).html('Save Changes');
             showError('Network error occurred');
             console.error('Error:', error);
         });
@@ -949,6 +1011,12 @@
 
     // Update existing saveAccount function to handle new fields
     function saveAccount() {
+        // Check if account creation is already in progress
+        if (isRequestInProgress('/api/accounts')) {
+            console.log('Account creation already in progress, ignoring duplicate request');
+            return;
+        }
+
         const formData = {
             name: $('#accountName').val(),
             provider: $('#provider').val(),
@@ -958,6 +1026,15 @@
             mfa_code: $('#mfaCode').val() || null
         };
 
+        const saveBtn = $('#saveBtn');
+        const form = $('#addAccountForm');
+        
+        // Track this request
+        const requestKey = addActiveRequest('/api/accounts');
+        
+        // Disable button to prevent multiple clicks
+        saveBtn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-2"></i>Saving...');
+        
         showLoading();
 
         fetch('/api/accounts', {
@@ -970,6 +1047,9 @@
         .then(response => response.json())
         .then(data => {
             hideLoading();
+            removeActiveRequest(requestKey); // Remove from tracking
+            form.data('submitting', false); // Reset submission flag
+            
             if (data.success) {
                 showSuccess('Account added successfully!');
                 
@@ -979,39 +1059,40 @@
                 setTimeout(() => location.reload(), 1000);
             } else {
                 showError(data.message || 'Failed to add account');
+                saveBtn.prop('disabled', false).html('<i class="fas fa-save me-2"></i>Save Account');
             }
         })
         .catch(error => {
             hideLoading();
+            removeActiveRequest(requestKey); // Remove from tracking
+            form.data('submitting', false); // Reset submission flag
+            saveBtn.prop('disabled', false).html('<i class="fas fa-save me-2"></i>Save Account');
             showError('Network error occurred');
             console.error('Error:', error);
         });
     }
 
-    // Update form submission handler
-    $('#addAccountForm').off('submit').on('submit', function(e) {
-        e.preventDefault();
-        const authType = $('#authType').val();
-        
-        if (authType === 'api_auth' && !connectionTested) {
-            showError('Please test the connection before saving the account');
-            return;
-        }
-        saveAccount();
-    });
-
     // Reset form when modal is closed
     $('#addAccountModal').on('hidden.bs.modal', function() {
-        $('#addAccountForm')[0].reset();
-        $('#saveBtn').prop('disabled', false);
+        const form = $('#addAccountForm');
+        form[0].reset();
+        form.data('submitting', false); // Reset submission flag
+        $('#saveBtn').prop('disabled', false).html('<i class="fas fa-save me-2"></i>Save Account');
         $('#testBtn').removeClass('btn-success').addClass('btn-primary')
-            .html('<i class="fas fa-flask me-2"></i>Test Connection');
+            .html('<i class="fas fa-flask me-2"></i>Test Connection').prop('disabled', false);
         connectionTested = false;
         $('#csvPreview').hide();
         $('#authFields').hide();
         $('#testConnectionSection').hide();
         $('#warningSection').hide();
         $('#testBtn').hide();
+    });
+
+    // Reset edit form when modal is closed
+    $('#editAccountModal').on('hidden.bs.modal', function() {
+        const form = $('#editAccountForm');
+        form.data('submitting', false); // Reset submission flag
+        form.find('button[type="submit"]').prop('disabled', false).html('Save Changes');
     });
 
     // Account-specific CSV Import Functions
@@ -1076,12 +1157,15 @@
             return;
         }
         
+        const form = $('#importToAccountForm');
+        const importBtn = $('#accountImportBtn');
+        
         const formData = new FormData();
         formData.append('csv_file', file);
         formData.append('overwrite_data', overwriteData);
         
         showLoading();
-        $('#accountImportBtn').prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-2"></i>Importing...');
+        importBtn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-2"></i>Importing...');
         
         fetch(`/api/accounts/${accountId}/import-csv`, {
             method: 'POST',
@@ -1090,7 +1174,8 @@
         .then(response => response.json())
         .then(data => {
             hideLoading();
-            $('#accountImportBtn').prop('disabled', false).html('<i class="fas fa-upload me-2"></i>Import Data');
+            form.data('submitting', false); // Reset submission flag
+            importBtn.prop('disabled', false).html('<i class="fas fa-upload me-2"></i>Import Data');
             
             if (data.success) {
                 let message = data.message || `CSV imported successfully!`;
@@ -1120,7 +1205,8 @@
         })
         .catch(error => {
             hideLoading();
-            $('#accountImportBtn').prop('disabled', false).html('<i class="fas fa-upload me-2"></i>Import Data');
+            form.data('submitting', false); // Reset submission flag
+            importBtn.prop('disabled', false).html('<i class="fas fa-upload me-2"></i>Import Data');
             showError('Error importing CSV file');
             console.error('Error:', error);
         });
@@ -1128,7 +1214,9 @@
 
     // Reset account import form when modal is closed
     $('#importToAccountModal').on('hidden.bs.modal', function() {
-        $('#importToAccountForm')[0].reset();
+        const form = $('#importToAccountForm');
+        form[0].reset();
+        form.data('submitting', false); // Reset submission flag
         $('#accountCsvPreview').hide();
         $('#accountImportBtn').prop('disabled', true).html('<i class="fas fa-upload me-2"></i>Import Data');
     });

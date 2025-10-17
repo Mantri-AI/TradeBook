@@ -165,6 +165,7 @@ def api_test_connection():
 @app.route('/api/accounts', methods=['GET', 'POST'])
 def api_accounts():
     """API for account management"""
+    
     if request.method == 'POST':
         data = request.get_json()
         
@@ -182,10 +183,15 @@ def api_accounts():
         if auth_type == 'api_auth' and (not username or not password):
             return jsonify({'success': False, 'message': 'Username and password are required for API authentication'}), 400
         
+        # Check if account name already exists
+        existing_account_by_name = Account.query.filter_by(name=name).first()
+        if existing_account_by_name:
+            return jsonify({'success': False, 'message': f'An account with the name "{name}" already exists'}), 400
+        
         # Check if username already exists for this provider (if username provided)
         if username:
-            existing_account = Account.query.filter_by(provider=provider, username=username).first()
-            if existing_account:
+            existing_account_by_username = Account.query.filter_by(provider=provider, username=username).first()
+            if existing_account_by_username:
                 return jsonify({'success': False, 'message': f'An account with this username already exists for {provider}'}), 400
         
         # Create new account
@@ -323,6 +329,8 @@ def api_import_csv():
         
         if provider == 'robinhood':
             result = csv_service.import_robinhood_csv(csv_content, account)
+        elif provider == 'fidelity':
+            result = csv_service.import_fidelity_csv(csv_content, account)
         else:
             # For other providers, use generic import (future enhancement)
             return jsonify({'success': False, 'message': f'CSV import for {provider} not yet supported'}), 400
@@ -355,6 +363,8 @@ def api_import_csv_to_account(account_id):
         
         if account.provider == 'robinhood':
             result = csv_service.import_robinhood_csv(csv_content, account)
+        elif account.provider == 'fidelity':
+            result = csv_service.import_fidelity_csv(csv_content, account)
         else:
             return jsonify({'success': False, 'message': f'CSV import for {account.provider} not yet supported'}), 400
         
@@ -505,6 +515,19 @@ def api_trades_recent():
     return jsonify({
         'trades': [trade.to_dict() for trade in trades]
     })
+
+@app.route('/api/trades/<int:trade_id>')
+def api_trade_detail(trade_id):
+    """Get individual trade details"""
+    trade = Trade.query.get_or_404(trade_id)
+    
+    # Convert trade to dictionary with all details
+    trade_dict = trade.to_dict()
+    
+    # Add account name for convenience
+    trade_dict['account_name'] = trade.account.name
+    
+    return jsonify(trade_dict)
 
 @app.route('/api/positions/top')
 def api_positions_top():
