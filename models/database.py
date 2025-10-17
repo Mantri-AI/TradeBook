@@ -349,3 +349,68 @@ class TradingSession(db.Model):
     
     def __repr__(self):
         return f'<TradingSession {self.session_date} - {self.total_trades} trades>'
+
+
+class UploadHistory(db.Model):
+    """File upload history tracking"""
+    __tablename__ = 'upload_history'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('accounts.id'), nullable=False)
+    
+    # File information
+    filename = db.Column(db.String(255), nullable=False)
+    original_filename = db.Column(db.String(255), nullable=False)
+    file_size = db.Column(db.Integer)  # Size in bytes
+    file_type = db.Column(db.String(50))  # csv, xlsx, etc.
+    
+    # Upload details
+    upload_timestamp = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    upload_status = db.Column(db.String(20), default='pending')  # pending, processing, completed, failed
+    
+    # Import results
+    total_rows = db.Column(db.Integer, default=0)
+    successful_imports = db.Column(db.Integer, default=0)
+    failed_imports = db.Column(db.Integer, default=0)
+    error_message = db.Column(db.Text)
+    
+    # Processing details
+    processing_started_at = db.Column(db.DateTime)
+    processing_completed_at = db.Column(db.DateTime)
+    import_source = db.Column(db.String(50))  # 'robinhood', 'fidelity', 'generic'
+    
+    # Metadata
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Relationship
+    account = db.relationship('Account', backref=db.backref('upload_history', lazy='dynamic', cascade='all, delete-orphan'))
+    
+    __table_args__ = (
+        Index('idx_account_upload_time', 'account_id', 'upload_timestamp'),
+        Index('idx_upload_status', 'upload_status'),
+    )
+    
+    def __repr__(self):
+        return f'<UploadHistory {self.original_filename} - {self.upload_status}>'
+    
+    def to_dict(self):
+        """Convert to dictionary for JSON serialization"""
+        return {
+            'id': self.id,
+            'account_id': self.account_id,
+            'filename': self.filename,
+            'original_filename': self.original_filename,
+            'file_size': self.file_size,
+            'file_type': self.file_type,
+            'upload_timestamp': self.upload_timestamp.isoformat(),
+            'upload_status': self.upload_status,
+            'total_rows': self.total_rows,
+            'successful_imports': self.successful_imports,
+            'failed_imports': self.failed_imports,
+            'error_message': self.error_message,
+            'processing_started_at': self.processing_started_at.isoformat() if self.processing_started_at else None,
+            'processing_completed_at': self.processing_completed_at.isoformat() if self.processing_completed_at else None,
+            'import_source': self.import_source,
+            'notes': self.notes
+        }

@@ -24,7 +24,7 @@ from models.database import db
 db.init_app(app)
 
 # Import models and services after db initialization
-from models.database import Account, Position, Trade, StockData, OptionData
+from models.database import Account, Position, Trade, StockData, OptionData, UploadHistory
 from services.robinhood_service import RobinhoodService
 from services.data_analyzer import DataAnalyzer
 from services.csv_import_service import CSVImportService
@@ -96,20 +96,38 @@ def positions():
 @app.route('/trades')
 def trades():
     """View trading history"""
-    account_id = request.args.get('account_id')
+    # Get single values for filters (changed from multiple)
+    account_id = request.args.get('account_id', type=int)
     days = request.args.get('days', 30, type=int)
-    search = request.args.get('search', '')
+    side = request.args.get('side')
+    trans_code = request.args.get('trans_code')
+    symbol = request.args.get('symbol')
+    search = request.args.get('search', '')  # Keep for backward compatibility
     
     query = Trade.query.join(Account)
     
+    # Apply account filter
     if account_id:
         query = query.filter(Account.id == account_id)
     
     # Filter by date range
-    start_date = datetime.now() - timedelta(days=days)
-    query = query.filter(Trade.executed_at >= start_date)
+    if days != 'all':
+        start_date = datetime.now() - timedelta(days=days)
+        query = query.filter(Trade.executed_at >= start_date)
     
-    # Search functionality
+    # Apply side filter
+    if side:
+        query = query.filter(Trade.side == side)
+    
+    # Apply trans code filter  
+    if trans_code:
+        query = query.filter(Trade.trans_code == trans_code)
+    
+    # Apply symbol filter
+    if symbol:
+        query = query.filter(Trade.symbol == symbol)
+    
+    # Search functionality (backward compatibility)
     if search:
         query = query.filter(Trade.symbol.ilike(f'%{search}%'))
     
@@ -117,7 +135,9 @@ def trades():
     accounts = Account.query.filter_by(is_active=True).all()
     
     return render_template('trades.html', trades=trades, accounts=accounts,
-                         selected_account=account_id, days=days, search=search)
+                         selected_account=account_id, days=days, search=search, 
+                         selected_side=side, selected_trans_code=trans_code, 
+                         selected_symbol=symbol)
 
 @app.route('/analytics')
 def analytics():
@@ -280,10 +300,14 @@ def api_account_details(account_id):
     recent_positions = Position.query.filter_by(account_id=account_id).limit(5).all()
     recent_trades = Trade.query.filter_by(account_id=account_id).order_by(Trade.executed_at.desc()).limit(5).all()
     
+    # Get upload history
+    upload_history = UploadHistory.query.filter_by(account_id=account_id).order_by(UploadHistory.upload_timestamp.desc()).limit(10).all()
+    
     return jsonify({
         'account': account.to_dict(),
         'recent_positions': [pos.to_dict() for pos in recent_positions],
         'recent_trades': [trade.to_dict() for trade in recent_trades],
+        'upload_history': [upload.to_dict() for upload in upload_history],
         'summary': {
             'total_positions': Position.query.filter_by(account_id=account_id).count(),
             'total_trades': Trade.query.filter_by(account_id=account_id).count(),
@@ -344,31 +368,123 @@ def api_import_csv():
 @app.route('/api/accounts/<int:account_id>/import-csv', methods=['POST'])
 def api_import_csv_to_account(account_id):
     """Import CSV data to existing account"""
+    from datetime import datetime
+    import uuid
+    
     try:
         account = Account.query.get_or_404(account_id)
         
-        if 'csv_file' not in request.files:
-            return jsonify({'success': False, 'message': 'No CSV file provided'}), 400
+        # Check for multiple files
+        csv_files = request.files.getlist('csv_files')
+        if not csv_files or len(csv_files) == 0:
+            # Check for single file (backward compatibility)
+            if 'csv_file' in request.files:
+                csv_files = [request.files['csv_file']]
+            else:
+                return jsonify({'success': False, 'message': 'No CSV files provided'}), 400
         
-        csv_file = request.files['csv_file']
+        results = []
+        total_imported = 0
+        total_duplicates = 0
+        total_skipped = 0
+        files_processed = 0
         
-        if not csv_file.filename:
-            return jsonify({'success': False, 'message': 'No file selected'}), 400
-        
-        # Read CSV content
-        csv_content = csv_file.read().decode('utf-8')
-        
-        # Import based on provider
         csv_service = CSVImportService()
         
-        if account.provider == 'robinhood':
-            result = csv_service.import_robinhood_csv(csv_content, account)
-        elif account.provider == 'fidelity':
-            result = csv_service.import_fidelity_csv(csv_content, account)
-        else:
-            return jsonify({'success': False, 'message': f'CSV import for {account.provider} not yet supported'}), 400
+        for csv_file in csv_files:
+            if not csv_file.filename:
+                continue
+                
+            # Create upload history record
+            upload_history = UploadHistory(
+                account_id=account_id,
+                filename=f"{uuid.uuid4()}_{csv_file.filename}",
+                original_filename=csv_file.filename,
+                file_size=len(csv_file.read()),
+                file_type='csv',
+                upload_status='processing',
+                processing_started_at=datetime.utcnow(),
+                import_source=account.provider
+            )
+            
+            # Reset file pointer after reading for size
+            csv_file.seek(0)
+            
+            try:
+                # Read CSV content
+                csv_content = csv_file.read().decode('utf-8')
+                
+                # Count total rows for tracking
+                lines = csv_content.split('\n')
+                upload_history.total_rows = len([line for line in lines if line.strip()]) - 1  # Exclude header
+                
+                db.session.add(upload_history)
+                db.session.commit()  # Save to get ID
+                
+                # Import based on provider
+                if account.provider == 'robinhood':
+                    result = csv_service.import_robinhood_csv(csv_content, account)
+                elif account.provider == 'fidelity':
+                    result = csv_service.import_fidelity_csv(csv_content, account)
+                else:
+                    result = {'success': False, 'message': f'CSV import for {account.provider} not yet supported'}
+                
+                if result.get('success'):
+                    # Update upload history with results
+                    upload_history.upload_status = 'completed'
+                    upload_history.successful_imports = result.get('imported_count', 0)
+                    upload_history.failed_imports = result.get('failed_count', 0)
+                    upload_history.processing_completed_at = datetime.utcnow()
+                    
+                    total_imported += result.get('imported_count', 0)
+                    total_duplicates += result.get('duplicates_count', 0)
+                    total_skipped += result.get('skipped_rows', 0)
+                    files_processed += 1
+                    
+                else:
+                    upload_history.upload_status = 'failed'
+                    upload_history.error_message = result.get('message', 'Unknown error')
+                    upload_history.processing_completed_at = datetime.utcnow()
+                
+                results.append({
+                    'filename': csv_file.filename,
+                    'success': result.get('success', False),
+                    'message': result.get('message', ''),
+                    'imported_count': result.get('imported_count', 0)
+                })
+                
+            except Exception as file_error:
+                upload_history.upload_status = 'failed'
+                upload_history.error_message = str(file_error)
+                upload_history.processing_completed_at = datetime.utcnow()
+                
+                results.append({
+                    'filename': csv_file.filename,
+                    'success': False,
+                    'message': str(file_error),
+                    'imported_count': 0
+                })
+            
+            finally:
+                db.session.commit()
         
-        return jsonify(result)
+        # Prepare response
+        if files_processed > 0:
+            return jsonify({
+                'success': True,
+                'message': f'Processed {files_processed} files successfully',
+                'files_processed': files_processed,
+                'imported_count': total_imported,
+                'duplicates_count': total_duplicates,
+                'skipped_rows': total_skipped,
+                'results': results
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'No files were processed successfully',
+                'results': results
+            })
         
     except Exception as e:
         logger.error(f"Error in CSV import: {str(e)}")
@@ -700,6 +816,33 @@ def api_positions_top():
         'positions': [position.to_dict() for position in positions]
     })
 
+@app.route('/api/positions/rebuild', methods=['POST'])
+def api_rebuild_positions():
+    """Rebuild positions from trades for one or all accounts"""
+    try:
+        account_id = request.json.get('account_id') if request.is_json else request.form.get('account_id')
+        
+        if account_id:
+            account_id = int(account_id)
+            # Verify account exists and is active
+            account = Account.query.filter_by(id=account_id, is_active=True).first()
+            if not account:
+                return jsonify({'success': False, 'message': 'Account not found or inactive'}), 404
+        
+        analyzer = DataAnalyzer()
+        result = analyzer.rebuild_positions_from_trades(account_id=account_id)
+        
+        if result.get('success'):
+            return jsonify(result)
+        else:
+            return jsonify(result), 400
+            
+    except ValueError:
+        return jsonify({'success': False, 'message': 'Invalid account_id'}), 400
+    except Exception as e:
+        logger.error(f"Error rebuilding positions: {str(e)}")
+        return jsonify({'success': False, 'message': f'Error rebuilding positions: {str(e)}'}), 500
+
 # Enhanced Analytics API Endpoints
 @app.route('/api/analytics/cross-account')
 def api_cross_account_analytics():
@@ -785,23 +928,94 @@ def api_trans_code_analytics():
 @app.route('/api/analytics/symbols')
 def api_symbols_list():
     """Get list of all traded symbols"""
-    account_ids_param = request.args.get('account_ids')
-    
-    query = db.session.query(Trade.symbol).distinct().join(Account)
-    
-    if account_ids_param:
-        try:
-            account_ids = [int(x) for x in account_ids_param.split(',')]
-            query = query.filter(Account.id.in_(account_ids))
-        except ValueError:
-            return jsonify({'success': False, 'message': 'Invalid account IDs format'}), 400
-    
-    symbols = query.filter(Account.is_active == True).all()
-    
-    return jsonify({
-        'symbols': [symbol[0] for symbol in symbols],
-        'count': len(symbols)
-    })
+    try:
+        # Get symbols from trades
+        trade_symbols = db.session.query(Trade.symbol).distinct().join(Account).filter(Account.is_active == True).all()
+        # Get symbols from positions  
+        position_symbols = db.session.query(Position.symbol).distinct().join(Account).filter(Account.is_active == True).all()
+        
+        # Combine and deduplicate
+        all_symbols = set([symbol[0] for symbol in trade_symbols] + [symbol[0] for symbol in position_symbols])
+        # Remove any empty or None values and sort
+        symbols = sorted([symbol for symbol in all_symbols if symbol and symbol.strip()])
+        
+        return jsonify({
+            'symbols': symbols,
+            'count': len(symbols)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting symbols list: {str(e)}")
+        return jsonify({'symbols': [], 'count': 0}), 500
+
+@app.route('/api/symbols')
+def api_symbols():
+    """Get all unique symbols (alias for consistency)"""
+    return api_symbols_list()
+
+@app.route('/api/filters/values')
+def api_filter_values():
+    """Get all filter values for dropdowns"""
+    try:
+        # Get symbols from trades and positions
+        trade_symbols = db.session.query(Trade.symbol).distinct().join(Account).filter(Account.is_active == True).all()
+        position_symbols = db.session.query(Position.symbol).distinct().join(Account).filter(Account.is_active == True).all()
+        
+        # Combine and deduplicate symbols
+        all_symbols = set([symbol[0] for symbol in trade_symbols] + [symbol[0] for symbol in position_symbols])
+        symbols = sorted([symbol for symbol in all_symbols if symbol and symbol.strip()])
+        
+        # Get unique transaction codes
+        trans_codes = db.session.query(Trade.trans_code).distinct().join(Account).filter(Account.is_active == True).all()
+        trans_codes = sorted([code[0] for code in trans_codes if code[0] and code[0].strip()])
+        
+        # Get unique sides
+        sides = db.session.query(Trade.side).distinct().join(Account).filter(Account.is_active == True).all()
+        sides = sorted([side[0] for side in sides if side[0] and side[0].strip()])
+        
+        # Get accounts
+        accounts = Account.query.filter_by(is_active=True).all()
+        account_data = [{'id': acc.id, 'name': acc.name} for acc in accounts]
+        
+        return jsonify({
+            'symbols': symbols,
+            'trans_codes': trans_codes,
+            'sides': sides,
+            'accounts': account_data
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting filter values: {str(e)}")
+        return jsonify({
+            'symbols': [],
+            'trans_codes': [],
+            'sides': [],
+            'accounts': []
+        }), 500
+
+@app.route('/api/positions/filters/values')
+def api_position_filter_values():
+    """Get filter values specific to positions"""
+    try:
+        # Get symbols from positions only
+        position_symbols = db.session.query(Position.symbol).distinct().join(Account).filter(Account.is_active == True).all()
+        symbols = sorted([symbol[0] for symbol in position_symbols if symbol[0] and symbol[0].strip()])
+        
+        # Get accounts
+        accounts = Account.query.filter_by(is_active=True).all()
+        account_data = [{'id': acc.id, 'name': acc.name} for acc in accounts]
+        
+        return jsonify({
+            'symbols': symbols,
+            'accounts': account_data
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting position filter values: {str(e)}")
+        return jsonify({
+            'symbols': [],
+            'accounts': []
+        }), 500
 
 def _get_trades_by_day(trades):
     """Helper function to group trades by day"""

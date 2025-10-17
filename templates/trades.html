@@ -23,15 +23,11 @@
 <!-- Filters Section -->
 <div class="filter-section">
     <div class="row">
-        <div class="col-md-3">
+        <div class="col-md-2">
             <label for="accountFilter" class="form-label">Account</label>
             <select class="form-select" id="accountFilter" onchange="applyFilters()">
                 <option value="">All Accounts</option>
-                {% for account in accounts %}
-                    <option value="{{ account.id }}" {% if selected_account == account.id|string %}selected{% endif %}>
-                        {{ account.name }}
-                    </option>
-                {% endfor %}
+                <!-- Options will be populated by JavaScript -->
             </select>
         </div>
         <div class="col-md-2">
@@ -47,35 +43,29 @@
         <div class="col-md-2">
             <label for="sideFilter" class="form-label">Side</label>
             <select class="form-select" id="sideFilter" onchange="applyFilters()">
-                <option value="">All</option>
-                <option value="buy">Buy Only</option>
-                <option value="sell">Sell Only</option>
+                <option value="">All Sides</option>
+                <!-- Options will be populated by JavaScript -->
             </select>
         </div>
         <div class="col-md-2">
             <label for="transCodeFilter" class="form-label">Trans Code</label>
             <select class="form-select" id="transCodeFilter" onchange="applyFilters()">
-                <option value="">All Codes</option>
-                <option value="BTO">BTO</option>
-                <option value="STO">STO</option>
-                <option value="BTC">BTC</option>
-                <option value="STC">STC</option>
+                <option value="">All Trans Codes</option>
+                <!-- Options will be populated by JavaScript -->
             </select>
-        </div>
-        <div class="col-md-3">
-            <label for="searchSymbol" class="form-label">Search Symbol</label>
-            <input type="text" class="form-control search-box" id="searchSymbol" 
-                   placeholder="AAPL, TSLA, etc." value="{{ search }}" onkeyup="filterBySymbol()">
         </div>
         <div class="col-md-2">
-            <label for="sortBy" class="form-label">Sort By</label>
-            <select class="form-select" id="sortBy" onchange="sortTrades()">
-                <option value="date">Date (Latest)</option>
-                <option value="symbol">Symbol</option>
-                <option value="amount">Amount</option>
-                <option value="quantity">Quantity</option>
-                <option value="trans_code">Trans Code</option>
+            <label for="symbolFilter" class="form-label">Symbol</label>
+            <select class="form-select" id="symbolFilter" onchange="applyFilters()">
+                <option value="">All Symbols</option>
+                <!-- Options will be populated by JavaScript -->
             </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">&nbsp;</label>
+            <button type="button" class="btn btn-outline-secondary w-100" onclick="clearFilters()">
+                <i class="fas fa-times me-1"></i>Clear
+            </button>
         </div>
     </div>
 </div>
@@ -507,7 +497,94 @@
     $(document).ready(function() {
         initializeCharts();
         generateSymbolSummary();
+        loadFilterValues();
+        initializeFiltersFromURL();
     });
+
+    function loadFilterValues() {
+        // Load all filter values from the database once
+        fetch('/api/filters/values')
+            .then(response => response.json())
+            .then(data => {
+                // Populate account filter
+                const accountSelect = $('#accountFilter');
+                data.accounts.forEach(account => {
+                    accountSelect.append(`<option value="${account.id}">${account.name}</option>`);
+                });
+                
+                // Populate side filter
+                const sideSelect = $('#sideFilter');
+                data.sides.forEach(side => {
+                    const capitalizedSide = side.charAt(0).toUpperCase() + side.slice(1);
+                    sideSelect.append(`<option value="${side}">${capitalizedSide}</option>`);
+                });
+                
+                // Populate trans code filter
+                const transCodeSelect = $('#transCodeFilter');
+                data.trans_codes.forEach(code => {
+                    let displayName = code;
+                    // Add descriptions for common codes
+                    switch(code) {
+                        case 'BTO': displayName = 'BTO (Buy to Open)'; break;
+                        case 'STO': displayName = 'STO (Sell to Open)'; break;
+                        case 'BTC': displayName = 'BTC (Buy to Close)'; break;
+                        case 'STC': displayName = 'STC (Sell to Close)'; break;
+                        case 'DIV': displayName = 'DIV (Dividend)'; break;
+                        case 'INT': displayName = 'INT (Interest)'; break;
+                        case 'BUY': displayName = 'BUY (Stock Buy)'; break;
+                        case 'SELL': displayName = 'SELL (Stock Sell)'; break;
+                    }
+                    transCodeSelect.append(`<option value="${code}">${displayName}</option>`);
+                });
+                
+                // Populate symbol filter
+                const symbolSelect = $('#symbolFilter');
+                data.symbols.forEach(symbol => {
+                    symbolSelect.append(`<option value="${symbol}">${symbol}</option>`);
+                });
+                
+                // Initialize selected values from URL after populating options
+                initializeFiltersFromURL();
+            })
+            .catch(error => {
+                console.error('Error loading filter values:', error);
+                showError('Failed to load filter options');
+            });
+    }
+
+    function loadSymbolsForFilter() {
+        // This function is now replaced by loadFilterValues()
+        // Keeping for backward compatibility but it does nothing
+        console.log('loadSymbolsForFilter() is deprecated, use loadFilterValues() instead');
+    }
+
+    function initializeFiltersFromURL() {
+        const urlParams = new URLSearchParams(window.location.search);
+        
+        // Set account filter (single selection)
+        const accountId = urlParams.get('account_id');
+        if (accountId) {
+            $('#accountFilter').val(accountId);
+        }
+        
+        // Set side filter (single selection)
+        const side = urlParams.get('side');
+        if (side) {
+            $('#sideFilter').val(side);
+        }
+        
+        // Set trans code filter (single selection)
+        const transCode = urlParams.get('trans_code');
+        if (transCode) {
+            $('#transCodeFilter').val(transCode);
+        }
+        
+        // Set symbol filter (single selection)
+        const symbol = urlParams.get('symbol');
+        if (symbol) {
+            $('#symbolFilter').val(symbol);
+        }
+    }
 
     function toggleView(view) {
         currentView = view;
@@ -669,42 +746,97 @@
     }
 
     function applyFilters() {
+        // Get single selected values
         const accountId = $('#accountFilter').val();
         const timeRange = $('#timeRange').val();
         const side = $('#sideFilter').val();
+        const transCode = $('#transCodeFilter').val();
+        const symbol = $('#symbolFilter').val();
         
         let url = new URL(window.location);
         
+        // Clear existing filter parameters
+        url.searchParams.delete('account_id');
+        url.searchParams.delete('side');
+        url.searchParams.delete('trans_code');
+        url.searchParams.delete('symbol');
+        
+        // Add single account ID
         if (accountId) {
             url.searchParams.set('account_id', accountId);
-        } else {
-            url.searchParams.delete('account_id');
         }
         
+        // Add time range (single selection)
         if (timeRange && timeRange !== '30') {
             url.searchParams.set('days', timeRange);
         } else {
             url.searchParams.delete('days');
         }
         
+        // Add single side
         if (side) {
             url.searchParams.set('side', side);
-        } else {
-            url.searchParams.delete('side');
+        }
+        
+        // Add single trans code
+        if (transCode) {
+            url.searchParams.set('trans_code', transCode);
+        }
+        
+        // Add single symbol
+        if (symbol) {
+            url.searchParams.set('symbol', symbol);
         }
         
         window.location.href = url.toString();
     }
 
-    function filterBySymbol() {
-        const searchTerm = $('#searchSymbol').val().toUpperCase();
+    function clearFilters() {
+        let url = new URL(window.location);
+        url.search = ''; // Clear all URL parameters
+        window.location.href = url.toString();
+    }
+
+    function filterTableClientSide() {
+        // This function can be used for real-time filtering if needed
+        // Currently filters are applied via URL reload with single selections
+        const selectedSymbol = $('#symbolFilter').val();
+        const selectedSide = $('#sideFilter').val();
+        const selectedCode = $('#transCodeFilter').val();
+        const selectedAccount = $('#accountFilter').val();
         
         $('#tradesTable tbody tr').each(function() {
-            const symbol = $(this).data('symbol');
-            if (symbol.includes(searchTerm)) {
-                $(this).show();
+            const row = $(this);
+            let show = true;
+            
+            // Filter by symbol
+            if (selectedSymbol) {
+                const symbol = row.data('symbol');
+                show = show && (symbol === selectedSymbol);
+            }
+            
+            // Filter by side
+            if (selectedSide) {
+                const side = row.data('side');
+                show = show && (side === selectedSide);
+            }
+            
+            // Filter by trans code
+            if (selectedCode) {
+                const transCode = row.data('trans-code');
+                show = show && (transCode === selectedCode);
+            }
+            
+            // Filter by account
+            if (selectedAccount) {
+                const accountId = row.data('account-id');
+                show = show && (accountId == selectedAccount);
+            }
+            
+            if (show) {
+                row.show();
             } else {
-                $(this).hide();
+                row.hide();
             }
         });
         

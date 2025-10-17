@@ -40,9 +40,11 @@
             </select>
         </div>
         <div class="col-md-3">
-            <label for="searchSymbol" class="form-label">Search Symbol</label>
-            <input type="text" class="form-control search-box" id="searchSymbol" placeholder="AAPL, TSLA, etc." 
-                   onkeyup="filterBySymbol()" autocomplete="off">
+            <label for="searchSymbol" class="form-label">Symbol</label>
+            <select class="form-select" id="searchSymbol" onchange="filterBySymbol()">
+                <option value="">All Symbols</option>
+                <!-- Options will be populated by JavaScript -->
+            </select>
         </div>
         <div class="col-md-3">
             <label for="sortBy" class="form-label">Sort By</label>
@@ -69,7 +71,7 @@
         <div class="card-body">
             <div class="metric-label">Total Value</div>
             <div class="metric-value" id="totalValue">
-                {{ "${:,.2f}".format(positions|sum(attribute='current_value') or 0) }}
+                {{ "${:,.2f}".format(positions|selectattr('current_value', 'defined')|selectattr('current_value', 'ne', none)|sum(attribute='current_value') or 0) }}
             </div>
             <div class="small text-muted">Portfolio Value</div>
         </div>
@@ -78,7 +80,7 @@
         <div class="card-body">
             <div class="metric-label">Day Change</div>
             <div class="metric-value" id="totalDayChange">
-                {{ "${:+,.2f}".format(positions|sum(attribute='day_change') or 0) }}
+                {{ "${:+,.2f}".format(positions|selectattr('day_change', 'defined')|selectattr('day_change', 'ne', none)|sum(attribute='day_change') or 0) }}
             </div>
             <div class="small text-muted">Today's P&L</div>
         </div>
@@ -87,7 +89,7 @@
         <div class="card-body">
             <div class="metric-label">Total Return</div>
             <div class="metric-value" id="totalReturn">
-                {{ "${:+,.2f}".format(positions|sum(attribute='total_return') or 0) }}
+                {{ "${:+,.2f}".format(positions|selectattr('total_return', 'defined')|selectattr('total_return', 'ne', none)|sum(attribute='total_return') or 0) }}
             </div>
             <div class="small text-muted">Unrealized P&L</div>
         </div>
@@ -360,9 +362,29 @@
         // Initialize view
         toggleView('table');
         
+        // Load symbols for filter
+        loadSymbolsForFilter();
+        
         // Set up real-time updates
         setInterval(updatePrices, 60000); // Update every minute
     });
+
+    function loadSymbolsForFilter() {
+        // Load unique symbols from positions
+        fetch('/api/positions/filters/values')
+            .then(response => response.json())
+            .then(data => {
+                const symbolSelect = $('#searchSymbol');
+                if (data.symbols && data.symbols.length > 0) {
+                    data.symbols.forEach(symbol => {
+                        symbolSelect.append(`<option value="${symbol}">${symbol}</option>`);
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error loading symbols:', error);
+            });
+    }
 
     function toggleView(view) {
         currentView = view;
@@ -402,12 +424,12 @@
     }
 
     function filterBySymbol() {
-        const searchTerm = $('#searchSymbol').val().toUpperCase();
+        const selectedSymbol = $('#searchSymbol').val();
         
         if (currentView === 'table') {
             $('#positionsTable tbody tr').each(function() {
                 const symbol = $(this).data('symbol');
-                if (symbol.includes(searchTerm)) {
+                if (!selectedSymbol || symbol === selectedSymbol) {
                     $(this).show();
                 } else {
                     $(this).hide();
@@ -416,7 +438,7 @@
         } else {
             $('#positionCards .position-card').each(function() {
                 const symbol = $(this).data('symbol');
-                if (symbol.includes(searchTerm)) {
+                if (!selectedSymbol || symbol === selectedSymbol) {
                     $(this).closest('.col-xl-4').show();
                 } else {
                     $(this).closest('.col-xl-4').hide();
@@ -596,7 +618,7 @@
         // Refresh all account data
         fetch('/api/sync-all', { method: 'POST' })
             .then(response => response.json())
-            .then(data => {
+            .then data => {
                 hideLoading();
                 if (data.success) {
                     showSuccess('Positions refreshed successfully');

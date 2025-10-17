@@ -149,17 +149,35 @@ class CSVImportService:
             
             db.session.commit()
             
+            # Rebuild positions after successful import
+            position_result = None
+            if imported_count > 0:
+                try:
+                    from services.data_analyzer import DataAnalyzer
+                    analyzer = DataAnalyzer()
+                    position_result = analyzer.rebuild_positions_from_trades(account_id=account.id)
+                    logger.info(f"Position rebuild for Fidelity account {account.id}: {position_result}")
+                except Exception as e:
+                    logger.error(f"Error rebuilding positions after Fidelity import: {str(e)}")
+            
             result = {
                 'success': True,
                 'imported_count': imported_count,
                 'duplicates_count': duplicates_count,
                 'errors_count': len(errors),
-                'errors': errors[:10]  # Return first 10 errors
+                'errors': errors[:10],  # Return first 10 errors
+                'position_rebuild': position_result
             }
             
             if skipped_rows > 0:
                 result['skipped_rows'] = skipped_rows
-                result['message'] = f'Imported {imported_count} trades, {duplicates_count} duplicates, {skipped_rows} rows skipped (empty data)'
+                result['message'] = f'Imported {imported_count} Fidelity trades, {duplicates_count} duplicates, {skipped_rows} rows skipped (empty data)'
+            else:
+                result['message'] = f'Imported {imported_count} Fidelity trades, {duplicates_count} duplicates found'
+            
+            # Add position rebuild message if successful
+            if position_result and position_result.get('success'):
+                result['message'] += f". Rebuilt {position_result.get('created_positions', 0)} positions"
             
             return result
             
@@ -261,23 +279,41 @@ class CSVImportService:
             
             db.session.commit()
             
+            # Rebuild positions after successful import
+            position_result = None
+            if imported_count > 0:
+                try:
+                    from services.data_analyzer import DataAnalyzer
+                    analyzer = DataAnalyzer()
+                    position_result = analyzer.rebuild_positions_from_trades(account_id=account.id)
+                    logger.info(f"Position rebuild for Robinhood account {account.id}: {position_result}")
+                except Exception as e:
+                    logger.error(f"Error rebuilding positions after Robinhood import: {str(e)}")
+            
             result = {
                 'success': True,
                 'imported_count': imported_count,
                 'duplicates_count': duplicates_count,
                 'errors_count': len(errors),
-                'errors': errors[:10]  # Return first 10 errors
+                'errors': errors[:10],  # Return first 10 errors
+                'position_rebuild': position_result
             }
             
             if skipped_rows > 0:
                 result['skipped_rows'] = skipped_rows
-                result['message'] = f'Imported {imported_count} trades, {duplicates_count} duplicates, {skipped_rows} rows skipped (empty data)'
+                result['message'] = f'Imported {imported_count} Robinhood trades, {duplicates_count} duplicates, {skipped_rows} rows skipped (empty data)'
+            else:
+                result['message'] = f'Imported {imported_count} Robinhood trades, {duplicates_count} duplicates found'
+            
+            # Add position rebuild message if successful
+            if position_result and position_result.get('success'):
+                result['message'] += f". Rebuilt {position_result.get('created_positions', 0)} positions"
             
             return result
             
         except Exception as e:
             db.session.rollback()
-            logger.error(f"Error importing CSV: {str(e)}")
+            logger.error(f"Error importing Robinhood CSV: {str(e)}")
             return {
                 'success': False,
                 'message': f'Error processing CSV: {str(e)}'
@@ -291,10 +327,7 @@ class CSVImportService:
         settle_date = pd.to_datetime(row['Settlement Date']).date() if pd.notna(row.get('Settlement Date')) else None
         
         # Parse instrument and description
-        symbol = str(row['Symbol']).strip().upper()
-        if symbol == "-AMAT250516P140":
-            import ipdb; ipdb.set_trace()
-            
+        symbol = str(row['Symbol']).strip().upper()            
         description = str(row['Description']).strip()
         action = str(row['Action']).strip().upper()
         position_type = str(row['Type']).strip()  # Cash, Margin, etc.

@@ -639,6 +639,189 @@ class DataAnalyzer:
             logger.error(f"Error in P&L over time analysis: {str(e)}")
             return {'success': False, 'message': str(e)}
     
+    def rebuild_positions_from_trades(self, account_id: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Rebuild position holdings from trade data for instruments that are not fully sold
+        
+        Args:
+            account_id: Optional account ID to rebuild positions for
+            
+        Returns:
+            Dictionary with rebuild results
+        """
+        try:
+            logger.info(f"Starting position rebuild for account_id: {account_id}")
+            
+            # Query trades
+            query = db.session.query(Trade).join(Account)
+            if account_id:
+                query = query.filter(Account.id == account_id)
+            
+            trades = query.filter(Account.is_active == True).order_by(Trade.activity_date, Trade.executed_at).all()
+            
+            if not trades:
+                return {'success': False, 'message': 'No trades found'}
+            
+            # Clear existing positions for the account(s)
+            if account_id:
+                Position.query.filter_by(account_id=account_id).delete()
+            else:
+                # Clear all positions for active accounts
+                Position.query.join(Account).filter(Account.is_active == True).delete()
+            
+            # Group trades by account and instrument
+            positions_data = {}
+            
+            for trade in trades:
+                # Create unique key for position
+                key_parts = [
+                    str(trade.account_id),
+                    trade.symbol,
+                    trade.instrument_type
+                ]
+                
+                # For options, include strike and expiration in key
+                if trade.instrument_type == 'option':
+                    key_parts.extend([
+                        str(trade.strike_price or 0),
+                        str(trade.expiration_date) if trade.expiration_date else 'no_exp',
+                        trade.option_type or 'unknown'
+                    ])
+                
+                position_key = '|'.join(key_parts)
+                
+                if position_key not in positions_data:
+                    positions_data[position_key] = {
+                        'account_id': trade.account_id,
+                        'symbol': trade.symbol,
+                        'instrument_type': trade.instrument_type,
+                        'option_type': trade.option_type,
+                        'strike_price': trade.strike_price,
+                        'expiration_date': trade.expiration_date,
+                        'quantity': 0.0,
+                        'total_cost': 0.0,
+                        'trades': []
+                    }
+                
+                position = positions_data[position_key]
+                position['trades'].append(trade)
+                
+                # Calculate position based on transaction codes and sides
+                quantity_change = self._calculate_quantity_change(trade)
+                cost_change = self._calculate_cost_change(trade, quantity_change)
+                
+                position['quantity'] += quantity_change
+                position['total_cost'] += cost_change
+            
+            # Create Position records for non-zero positions
+            created_positions = 0
+            skipped_positions = 0
+            
+            for position_key, pos_data in positions_data.items():
+                # Skip positions with zero or negative quantity
+                if pos_data['quantity'] <= 0:
+                    skipped_positions += 1
+                    continue
+                
+                # Calculate average buy price
+                avg_buy_price = pos_data['total_cost'] / pos_data['quantity'] if pos_data['quantity'] > 0 else 0
+                
+                # Create Position record
+                position = Position(
+                    account_id=pos_data['account_id'],
+                    symbol=pos_data['symbol'],
+                    instrument_type=pos_data['instrument_type'],
+                    quantity=pos_data['quantity'],
+                    average_buy_price=avg_buy_price,
+                    option_type=pos_data['option_type'],
+                    strike_price=pos_data['strike_price'],
+                    expiration_date=pos_data['expiration_date']
+                )
+                
+                db.session.add(position)
+                created_positions += 1
+            
+            # Commit changes
+            db.session.commit()
+            
+            logger.info(f"Position rebuild complete. Created: {created_positions}, Skipped: {skipped_positions}")
+            
+            return {
+                'success': True,
+                'created_positions': created_positions,
+                'skipped_positions': skipped_positions,
+                'total_trades_processed': len(trades),
+                'message': f'Successfully rebuilt {created_positions} positions from {len(trades)} trades'
+            }
+            
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error rebuilding positions: {str(e)}")
+            return {'success': False, 'message': str(e)}
+    
+    def _calculate_quantity_change(self, trade: Trade) -> float:
+        """
+        Calculate the quantity change for a position based on trade
+        
+        Args:
+            trade: Trade object
+            
+        Returns:
+            Quantity change (positive for buys, negative for sells)
+        """
+        # Map transaction codes to quantity changes
+        # This handles both Robinhood and Fidelity transaction codes
+        
+        buy_codes = {
+            'BTO',    # Buy to Open (Options)
+            'BTC',    # Buy to Close (Options) 
+            'Buy',    # Generic Buy
+            'PURCHASE',  # Fidelity Purchase
+            'REINVESTMENT',  # Dividend Reinvestment
+        }
+        
+        sell_codes = {
+            'STO',    # Sell to Open (Options)
+            'STC',    # Sell to Close (Options)
+            'Sell',   # Generic Sell
+            'SALE',   # Fidelity Sale
+        }
+        
+        # Handle specific transaction codes
+        trans_code = trade.trans_code.upper()
+        
+        if trans_code in buy_codes or trade.side == 'buy':
+            return abs(trade.quantity)
+        elif trans_code in sell_codes or trade.side == 'sell':
+            return -abs(trade.quantity)
+        elif trans_code in ['DIVIDEND', 'INTEREST', 'FEE']:
+            # Non-position affecting trades
+            return 0.0
+        else:
+            # Default to side-based logic
+            return abs(trade.quantity) if trade.side == 'buy' else -abs(trade.quantity)
+    
+    def _calculate_cost_change(self, trade: Trade, quantity_change: float) -> float:
+        """
+        Calculate the cost basis change for a position
+        
+        Args:
+            trade: Trade object
+            quantity_change: Calculated quantity change
+            
+        Returns:
+            Cost basis change
+        """
+        # Only add to cost basis for buys (positive quantity changes)
+        if quantity_change > 0:
+            return abs(trade.total_amount)
+        elif quantity_change < 0:
+            # For sells, we could implement FIFO/LIFO here, but for simplicity
+            # we'll just return 0 (cost basis reduction would need more complex logic)
+            return 0.0
+        else:
+            return 0.0
+    
     def get_trans_code_analytics(self, account_ids: Optional[List[int]] = None) -> Dict[str, Any]:
         """
         Get analytics by transaction code

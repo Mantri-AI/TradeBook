@@ -6,6 +6,9 @@
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
     <h1 class="h2"><i class="fas fa-users me-2"></i>Account Management</h1>
     <div class="btn-toolbar mb-2 mb-md-0">
+        <button type="button" class="btn btn-secondary me-2" onclick="rebuildPositions()" title="Rebuild all positions from trades">
+            <i class="fas fa-hammer me-2"></i>Rebuild All Positions
+        </button>
         <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addAccountModal">
             <i class="fas fa-plus me-2"></i>Add Account
         </button>
@@ -97,6 +100,9 @@
                                             {% endif %}
                                             <button class="btn btn-outline-info import-csv-btn" data-account-id="{{ account.id }}" data-account-name="{{ account.name }}" title="Import CSV Data">
                                                 <i class="fas fa-file-csv"></i>
+                                            </button>
+                                            <button class="btn btn-outline-success rebuild-positions-btn" data-account-id="{{ account.id }}" title="Rebuild Positions from Trades">
+                                                <i class="fas fa-hammer"></i>
                                             </button>
                                             <button class="btn btn-outline-danger delete-account-btn" data-account-id="{{ account.id }}" title="Delete Account">
                                                 <i class="fas fa-trash"></i>
@@ -338,16 +344,20 @@
                     </div>
                     
                     <div class="mb-3">
-                        <label for="accountCsvFile" class="form-label">CSV File *</label>
-                        <input type="file" class="form-control" id="accountCsvFile" accept=".csv" required onchange="previewAccountCSV()">
-                        <div class="form-text">Upload your trading data in CSV format. Supported formats: Robinhood exports, standard trading data with columns for symbol, quantity, price, date.</div>
+                        <label for="accountCsvFiles" class="form-label">CSV Files *</label>
+                        <input type="file" class="form-control" id="accountCsvFiles" accept=".csv" multiple required onchange="previewAccountCSV()">
+                        <div class="form-text">Upload one or more CSV files containing your trading data. Supported formats: Robinhood exports, Fidelity exports, standard trading data.</div>
+                        <div id="selectedFilesDisplay" class="mt-2" style="display: none;">
+                            <div class="small text-muted mb-2">Selected files:</div>
+                            <div id="selectedFilesList"></div>
+                        </div>
                     </div>
                     
                     <div id="accountCsvPreview" style="display: none;">
                         <div class="alert alert-secondary">
                             <div class="d-flex justify-content-between align-items-center mb-2">
                                 <span><i class="fas fa-table me-2"></i>Data Preview</span>
-                                <span class="badge bg-info" id="accountCsvRowCount">0 rows detected</span>
+                                <span class="badge bg-info" id="accountCsvRowCount">0 files, 0 rows detected</span>
                             </div>
                             <div id="accountCsvPreviewContent"></div>
                         </div>
@@ -479,6 +489,11 @@
             const accountId = $(this).data('account-id');
             const accountName = $(this).data('account-name');
             openImportToAccountModal(accountId, accountName);
+        });
+
+        $(document).on('click', '.rebuild-positions-btn', function() {
+            const accountId = $(this).data('account-id');
+            rebuildPositions(accountId);
         });
 
         // Handle import to account form submission
@@ -807,6 +822,52 @@
                         </div>
                     </div>
                     ` : ''}
+                    ${data.upload_history && data.upload_history.length > 0 ? `
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <h6>Upload History</h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>File Name</th>
+                                            <th>Status</th>
+                                            <th>Rows</th>
+                                            <th>Imported</th>
+                                            <th>Size</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${data.upload_history.map(upload => `
+                                            <tr>
+                                                <td>${new Date(upload.upload_timestamp).toLocaleDateString()}</td>
+                                                <td>
+                                                    <span class="text-primary" title="${upload.original_filename}">
+                                                        <i class="fas fa-file-csv me-1"></i>
+                                                        ${upload.original_filename.length > 20 ? 
+                                                            upload.original_filename.substring(0, 20) + '...' : 
+                                                            upload.original_filename}
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <span class="badge bg-${upload.upload_status === 'completed' ? 'success' : 
+                                                        upload.upload_status === 'failed' ? 'danger' : 
+                                                        upload.upload_status === 'processing' ? 'warning' : 'secondary'}">
+                                                        ${upload.upload_status}
+                                                    </span>
+                                                </td>
+                                                <td>${upload.total_rows || 0}</td>
+                                                <td>${upload.successful_imports || 0}</td>
+                                                <td>${(upload.file_size / 1024).toFixed(1)} KB</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    ` : ''}
                 `;
                 $('#accountDetailsContent').html(content);
                 
@@ -1106,62 +1167,113 @@
     }
 
     function previewAccountCSV() {
-        const fileInput = $('#accountCsvFile')[0];
-        const file = fileInput.files[0];
+        const fileInput = $('#accountCsvFiles')[0];
+        const files = fileInput.files;
         
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const csv = e.target.result;
-                const lines = csv.split('\n').filter(line => line.trim());
-                const previewLines = lines.slice(0, 6); // Show first 5 rows + header
+        if (files.length > 0) {
+            let totalRows = 0;
+            let previewContent = '';
+            let filesProcessed = 0;
+            
+            // Display selected files
+            let filesList = '';
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const fileSize = (file.size / 1024).toFixed(1);
+                filesList += `
+                    <div class="badge bg-light text-dark me-2 mb-1">
+                        <i class="fas fa-file-csv me-1"></i>
+                        ${file.name} (${fileSize} KB)
+                    </div>
+                `;
+            }
+            $('#selectedFilesList').html(filesList);
+            $('#selectedFilesDisplay').show();
+            
+            // Process each file for preview
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const reader = new FileReader();
                 
-                let table = '<div class="table-responsive"><table class="table table-sm table-striped">';
-                previewLines.forEach((line, index) => {
-                    if (line.trim()) {
-                        const cells = line.split(',').map(cell => cell.trim().replace(/"/g, ''));
-                        table += '<tr>';
-                        cells.forEach(cell => {
-                            const tag = index === 0 ? 'th' : 'td';
-                            table += `<${tag}>${cell}</${tag}>`;
-                        });
-                        table += '</tr>';
+                reader.onload = function(e) {
+                    const csv = e.target.result;
+                    const lines = csv.split('\n').filter(line => line.trim());
+                    const previewLines = lines.slice(0, 4); // Show first 3 rows + header
+                    totalRows += lines.length - 1; // Subtract header row
+                    
+                    previewContent += `
+                        <div class="mb-3">
+                            <div class="fw-bold text-primary mb-2">
+                                <i class="fas fa-file me-1"></i>${file.name} 
+                                <span class="badge bg-info ms-2">${lines.length - 1} rows</span>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-striped table-bordered">
+                    `;
+                    
+                    previewLines.forEach((line, index) => {
+                        if (line.trim()) {
+                            const cells = line.split(',').map(cell => cell.trim().replace(/"/g, ''));
+                            previewContent += '<tr>';
+                            cells.slice(0, 6).forEach(cell => { // Show first 6 columns
+                                const tag = index === 0 ? 'th' : 'td';
+                                previewContent += `<${tag} class="text-truncate" style="max-width: 120px;">${cell}</${tag}>`;
+                            });
+                            if (cells.length > 6) {
+                                previewContent += '<td class="text-muted">...</td>';
+                            }
+                            previewContent += '</tr>';
+                        }
+                    });
+                    
+                    previewContent += `
+                                </table>
+                            </div>
+                        </div>
+                    `;
+                    
+                    filesProcessed++;
+                    if (filesProcessed === files.length) {
+                        $('#accountCsvPreviewContent').html(previewContent);
+                        $('#accountCsvRowCount').text(`${files.length} files, ${totalRows} total rows`);
+                        $('#accountCsvPreview').show();
+                        $('#accountImportBtn').prop('disabled', false);
                     }
-                });
-                table += '</table></div>';
+                };
                 
-                if (lines.length > 6) {
-                    table += `<div class="text-muted small">... and ${lines.length - 6} more rows</div>`;
-                }
-                
-                $('#accountCsvPreviewContent').html(table);
-                $('#accountCsvRowCount').text(`${lines.length - 1} data rows detected`);
-                $('#accountCsvPreview').show();
-                $('#accountImportBtn').prop('disabled', false);
-            };
-            reader.readAsText(file);
+                reader.readAsText(file);
+            }
         } else {
+            $('#selectedFilesDisplay').hide();
             $('#accountCsvPreview').hide();
             $('#accountImportBtn').prop('disabled', true);
         }
     }
 
     function importToAccount() {
-        const fileInput = $('#accountCsvFile')[0];
-        const file = fileInput.files[0];
+        const fileInput = $('#accountCsvFiles')[0];
+        const files = fileInput.files;
         const accountId = $('#targetAccountId').val();
         const overwriteData = $('#accountOverwriteData').is(':checked');
         
-        if (!file || !accountId) {
-            showError('Please select a CSV file');
+        if (files.length === 0 || !accountId) {
+            showError('Please select at least one CSV file');
             return;
         }
         
         const form = $('#importToAccountForm');
         const importBtn = $('#accountImportBtn');
         
+        // Prevent multiple submissions
+        if (form.data('submitting')) return;
+        form.data('submitting', true);
+        
         const formData = new FormData();
-        formData.append('csv_file', file);
+        
+        // Add all files to form data
+        for (let i = 0; i < files.length; i++) {
+            formData.append('csv_files', files[i]);
+        }
         formData.append('overwrite_data', overwriteData);
         
         showLoading();
@@ -1178,19 +1290,23 @@
             importBtn.prop('disabled', false).html('<i class="fas fa-upload me-2"></i>Import Data');
             
             if (data.success) {
-                let message = data.message || `CSV imported successfully!`;
+                let message = data.message || `CSV files imported successfully!`;
                 if (!data.message) {
                     // Build custom message if not provided
+                    let details = [];
+                    if (data.files_processed) {
+                        details.push(`${data.files_processed} files processed`);
+                    }
                     if (data.imported_count) {
-                        message = `${data.imported_count} transactions imported`;
+                        details.push(`${data.imported_count} transactions imported`);
                     }
                     if (data.duplicates_count) {
-                        message += `, ${data.duplicates_count} duplicates skipped`;
+                        details.push(`${data.duplicates_count} duplicates skipped`);
                     }
                     if (data.skipped_rows) {
-                        message += `, ${data.skipped_rows} empty rows skipped`;
+                        details.push(`${data.skipped_rows} empty rows skipped`);
                     }
-                    message = `CSV imported successfully! ${message}.`;
+                    message = `CSV import completed! ${details.join(', ')}.`;
                 }
                 
                 showSuccess(message);
@@ -1200,16 +1316,58 @@
                 importModal.hide();
                 setTimeout(() => location.reload(), 1500);
             } else {
-                showError(data.message || 'Failed to import CSV');
+                showError(data.message || 'Failed to import CSV files');
             }
         })
         .catch(error => {
             hideLoading();
             form.data('submitting', false); // Reset submission flag
             importBtn.prop('disabled', false).html('<i class="fas fa-upload me-2"></i>Import Data');
-            showError('Error importing CSV file');
+            showError('Error importing CSV files');
             console.error('Error:', error);
         });
+    }
+
+    // Form submission handler for importing to account
+    $('#importToAccountForm').on('submit', function(e) {
+        e.preventDefault();
+        importToAccount();
+    });
+
+    function rebuildPositions(accountId) {
+        const message = accountId 
+            ? 'This will rebuild all positions from trade data for this account. Continue?'
+            : 'This will rebuild all positions from trade data for ALL active accounts. Continue?';
+        
+        if (confirm(message)) {
+            showLoading();
+            
+            const requestBody = accountId ? { account_id: accountId } : {};
+            
+            fetch('/api/positions/rebuild', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestBody)
+            })
+            .then(response => response.json())
+            .then(data => {
+                hideLoading();
+                if (data.success) {
+                    showSuccess(data.message || 'Positions rebuilt successfully');
+                    // Refresh the page to show updated position counts
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    showError(data.message || 'Failed to rebuild positions');
+                }
+            })
+            .catch(error => {
+                hideLoading();
+                showError('Error rebuilding positions');
+                console.error('Error:', error);
+            });
+        }
     }
 
     // Reset account import form when modal is closed
@@ -1218,6 +1376,7 @@
         form[0].reset();
         form.data('submitting', false); // Reset submission flag
         $('#accountCsvPreview').hide();
+        $('#selectedFilesDisplay').hide();
         $('#accountImportBtn').prop('disabled', true).html('<i class="fas fa-upload me-2"></i>Import Data');
     });
 </script>
