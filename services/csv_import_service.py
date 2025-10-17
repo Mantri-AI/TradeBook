@@ -348,6 +348,12 @@ class CSVImportService:
         # Map Fidelity action to trans_code and side
         trans_code, side = self._map_fidelity_action(action)
         
+        # Adjust amount based on side: negative for buy, positive for sell
+        if side == 'buy':
+            adjusted_amount = -abs(total_amount)
+        else:  # sell
+            adjusted_amount = abs(total_amount)
+        
         return {
             'account_id': account_id,
             'symbol': clean_symbol,
@@ -360,7 +366,7 @@ class CSVImportService:
             'side': side,
             'quantity': quantity,
             'price': price,
-            'total_amount': abs(total_amount),
+            'total_amount': adjusted_amount,
             'fees': fees,
             'option_type': option_data.get('option_type'),
             'strike_price': option_data.get('strike_price'),
@@ -451,6 +457,12 @@ class CSVImportService:
         option_data = self._parse_option_description(description)
         instrument_type = 'option' if option_data['is_option'] else 'stock'
         
+        # Adjust amount based on side: negative for buy, positive for sell
+        if side == 'buy':
+            adjusted_amount = -abs(total_amount)
+        else:  # sell
+            adjusted_amount = abs(total_amount)
+        
         return {
             'account_id': account_id,
             'symbol': symbol,
@@ -463,7 +475,7 @@ class CSVImportService:
             'side': side,
             'quantity': quantity,
             'price': price,
-            'total_amount': abs(total_amount),
+            'total_amount': adjusted_amount,
             'fees': 0,  # Robinhood typically doesn't charge fees
             'option_type': option_data.get('option_type'),
             'strike_price': option_data.get('strike_price'),
@@ -710,5 +722,11 @@ class CSVImportService:
         
         # Set executed_at from activity_date
         trade_data['executed_at'] = datetime.combine(trade_data['activity_date'], datetime.min.time())
+        
+        # Adjust amount based on side: negative for buy, positive for sell
+        if trade_data['side'] == 'buy':
+            trade_data['total_amount'] = -abs(trade_data['total_amount'])
+        else:  # sell
+            trade_data['total_amount'] = abs(trade_data['total_amount'])
         
         return trade_data

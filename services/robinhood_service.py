@@ -128,13 +128,20 @@ class RobinhoodService:
                     
                     # Filter by date
                     if executed_at >= datetime.now() - timedelta(days=days_back):
+                        # Calculate amount based on side (negative for buy, positive for sell)
+                        amount = float(order['quantity']) * float(order['price']) if order['price'] else 0
+                        if order['side'] == 'buy':
+                            total_amount = -abs(amount)
+                        else:  # sell
+                            total_amount = abs(amount)
+                        
                         trades.append({
                             'symbol': instrument_data['symbol'],
                             'instrument_type': 'stock',
                             'side': order['side'],
                             'quantity': float(order['quantity']),
                             'price': float(order['price']) if order['price'] else 0,
-                            'total_amount': float(order['quantity']) * float(order['price']) if order['price'] else 0,
+                            'total_amount': total_amount,
                             'fees': float(order.get('fees', 0)),
                             'executed_at': executed_at,
                             'state': order['state'],
@@ -153,13 +160,20 @@ class RobinhoodService:
                         
                         # Filter by date
                         if executed_at >= datetime.now() - timedelta(days=days_back):
+                            # Calculate amount based on side (negative for buy, positive for sell)
+                            amount = float(order['quantity']) * float(order['price']) if order['price'] else 0
+                            if leg['side'] == 'buy':
+                                total_amount = -abs(amount)
+                            else:  # sell
+                                total_amount = abs(amount)
+                                
                             trades.append({
                                 'symbol': instrument_data['chain_symbol'],
                                 'instrument_type': 'option',
                                 'side': leg['side'],
                                 'quantity': float(order['quantity']),
                                 'price': float(order['price']) if order['price'] else 0,
-                                'total_amount': float(order['quantity']) * float(order['price']) if order['price'] else 0,
+                                'total_amount': total_amount,
                                 'fees': float(order.get('fees', 0)),
                                 'option_type': instrument_data['type'],
                                 'strike_price': float(instrument_data['strike_price']),

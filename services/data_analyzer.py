@@ -108,22 +108,28 @@ class DataAnalyzer:
             
             # Basic metrics
             total_trades = len(trades)
-            total_volume = df['total_amount'].sum()
+            # Total volume is absolute value sum since buy amounts are negative
+            total_volume = df['total_amount'].abs().sum()
             total_fees = df['fees'].sum()
             
             # Buy/Sell analysis
             buy_trades = df[df['side'] == 'buy']
             sell_trades = df[df['side'] == 'sell']
             
-            buy_volume = buy_trades['total_amount'].sum() if len(buy_trades) > 0 else 0
+            # Buy volume should be positive (absolute value of negative amounts)
+            buy_volume = buy_trades['total_amount'].abs().sum() if len(buy_trades) > 0 else 0
+            # Sell volume is already positive
             sell_volume = sell_trades['total_amount'].sum() if len(sell_trades) > 0 else 0
             
-            # Symbol analysis
-            symbol_stats = df.groupby('symbol').agg({
-                'total_amount': 'sum',
-                'quantity': 'sum',
+            # Symbol analysis - use absolute values for volume ranking
+            df_abs = df.copy()
+            df_abs['abs_amount'] = df['total_amount'].abs()
+            symbol_stats = df_abs.groupby('symbol').agg({
+                'abs_amount': 'sum',
+                'quantity': 'sum', 
                 'fees': 'sum'
             }).reset_index()
+            symbol_stats.rename(columns={'abs_amount': 'total_amount'}, inplace=True)
             
             top_symbols = symbol_stats.nlargest(10, 'total_amount').to_dict('records')
             
@@ -347,7 +353,7 @@ class DataAnalyzer:
                 symbol_positions[symbol] = {'quantity': 0, 'cost_basis': 0}
             
             if trade.side == 'buy':
-                # Add to position
+                # Add to position (trade.total_amount is negative for buys, so we add it directly)
                 total_cost = symbol_positions[symbol]['cost_basis'] + trade.total_amount
                 total_quantity = symbol_positions[symbol]['quantity'] + trade.quantity
                 symbol_positions[symbol] = {

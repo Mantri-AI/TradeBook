@@ -24,36 +24,50 @@
             <label for="accountFilter" class="form-label">Account</label>
             <select class="form-select" id="accountFilter" onchange="applyFilters()">
                 <option value="">All Accounts</option>
-                {% for account in accounts %}
-                    <option value="{{ account.id }}" {% if selected_account == account.id|string %}selected{% endif %}>
-                        {{ account.name }}
-                    </option>
-                {% endfor %}
-            </select>
-        </div>
-        <div class="col-md-3">
-            <label for="typeFilter" class="form-label">Position Type</label>
-            <select class="form-select" id="typeFilter" onchange="applyFilters()">
-                <option value="all" {% if selected_type == 'all' %}selected{% endif %}>All Types</option>
-                <option value="stocks" {% if selected_type == 'stocks' %}selected{% endif %}>Stocks Only</option>
-                <option value="options" {% if selected_type == 'options' %}selected{% endif %}>Options Only</option>
-            </select>
-        </div>
-        <div class="col-md-3">
-            <label for="searchSymbol" class="form-label">Symbol</label>
-            <select class="form-select" id="searchSymbol" onchange="filterBySymbol()">
-                <option value="">All Symbols</option>
                 <!-- Options will be populated by JavaScript -->
             </select>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
+            <label for="typeFilter" class="form-label">Position Type</label>
+            <select class="form-select" id="typeFilter" onchange="applyFilters()">
+                <option value="">All Types</option>
+                <!-- Options will be populated by JavaScript -->
+            </select>
+        </div>
+        <div class="col-md-4">
+            <label for="symbolFilter" class="form-label">Symbol(s)</label>
+            <div class="input-group">
+                <select class="form-select" id="symbolDropdown" onchange="selectSymbolFromDropdown()" style="display: none;">
+                    <option value="">Select Symbol</option>
+                    <!-- Options will be populated by JavaScript -->
+                </select>
+                <input type="text" class="form-control" id="symbolInput" placeholder="Enter symbols (comma separated) or use dropdown" onchange="applyFilters()" />
+                <button class="btn btn-outline-secondary" type="button" id="symbolToggleBtn" onclick="toggleSymbolInput()">
+                    <i class="fas fa-chevron-down"></i>
+                </button>
+            </div>
+        </div>
+        <div class="col-md-2">
             <label for="sortBy" class="form-label">Sort By</label>
-            <select class="form-select" id="sortBy" onchange="sortPositions()">
+            <select class="form-select" id="sortBy" onchange="applySorting()">
                 <option value="value">Current Value</option>
                 <option value="symbol">Symbol</option>
                 <option value="dayChange">Day Change</option>
                 <option value="totalReturn">Total Return</option>
             </select>
+        </div>
+        <div class="col-md-1">
+            <label class="form-label">&nbsp;</label>
+            <div class="d-grid">
+                <button class="btn btn-outline-secondary btn-sm" onclick="clearAllFilters()" title="Clear All Filters">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+    <div class="row mt-2">
+        <div class="col-12">
+            <small class="text-muted" id="filterStatus">Loading positions...</small>
         </div>
     </div>
 </div>
@@ -350,6 +364,37 @@
     .table th:hover {
         background-color: rgba(52, 152, 219, 0.1);
     }
+
+    .filter-section {
+        background-color: #f8f9fa;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+    }
+
+    .filter-section .input-group .form-select {
+        border-top-right-radius: 0;
+        border-bottom-right-radius: 0;
+    }
+
+    .filter-section .input-group .form-control {
+        border-left: 0;
+        border-right: 0;
+    }
+
+    .filter-section .input-group .btn {
+        border-top-left-radius: 0;
+        border-bottom-left-radius: 0;
+    }
+
+    #filterStatus {
+        font-style: italic;
+        font-size: 0.9rem;
+    }
+
+    .symbol-toggle-btn {
+        min-width: 40px;
+    }
 </style>
 {% endblock %}
 
@@ -357,33 +402,240 @@
 <script>
     let currentView = 'table';
     let sortDirection = {};
+    let filterData = {};
+    let symbolInputMode = true; // true for input, false for dropdown
 
     $(document).ready(function() {
         // Initialize view
         toggleView('table');
         
-        // Load symbols for filter
-        loadSymbolsForFilter();
+        // Load filter data once
+        loadFilterData();
         
         // Set up real-time updates
         setInterval(updatePrices, 60000); // Update every minute
+        
+        // Update filter status initially
+        updateFilterStatus();
     });
 
-    function loadSymbolsForFilter() {
-        // Load unique symbols from positions
+    function loadFilterData() {
+        // Load all filter options once from backend
         fetch('/api/positions/filters/values')
             .then(response => response.json())
             .then(data => {
-                const symbolSelect = $('#searchSymbol');
-                if (data.symbols && data.symbols.length > 0) {
-                    data.symbols.forEach(symbol => {
-                        symbolSelect.append(`<option value="${symbol}">${symbol}</option>`);
-                    });
+                if (data.success) {
+                    filterData = data;
+                    populateFilterOptions();
+                    updateFilterStatus();
                 }
             })
             .catch(error => {
-                console.error('Error loading symbols:', error);
+                console.error('Error loading filter data:', error);
+                $('#filterStatus').text('Error loading filter options');
             });
+    }
+
+    function populateFilterOptions() {
+        // Populate account filter
+        const accountSelect = $('#accountFilter');
+        accountSelect.find('option:not(:first)').remove(); // Keep "All Accounts" option
+        if (filterData.accounts) {
+            filterData.accounts.forEach(account => {
+                accountSelect.append(`<option value="${account.id}">${account.name}</option>`);
+            });
+        }
+
+        // Populate type filter
+        const typeSelect = $('#typeFilter');
+        typeSelect.find('option:not(:first)').remove(); // Keep "All Types" option
+        if (filterData.instrument_types) {
+            filterData.instrument_types.forEach(type => {
+                const displayName = type === 'stock' ? 'Stocks' : 'Options';
+                typeSelect.append(`<option value="${type}">${displayName}</option>`);
+            });
+        }
+
+        // Populate symbol dropdown
+        const symbolDropdown = $('#symbolDropdown');
+        symbolDropdown.find('option:not(:first)').remove(); // Keep "Select Symbol" option
+        if (filterData.symbols) {
+            filterData.symbols.forEach(symbol => {
+                symbolDropdown.append(`<option value="${symbol}">${symbol}</option>`);
+            });
+        }
+    }
+
+    function toggleSymbolInput() {
+        const symbolInput = $('#symbolInput');
+        const symbolDropdown = $('#symbolDropdown');
+        const toggleBtn = $('#symbolToggleBtn');
+
+        if (symbolInputMode) {
+            // Switch to dropdown mode
+            symbolInput.hide();
+            symbolDropdown.show();
+            toggleBtn.html('<i class="fas fa-keyboard"></i>');
+            symbolInputMode = false;
+        } else {
+            // Switch to input mode
+            symbolDropdown.hide();
+            symbolInput.show().focus();
+            toggleBtn.html('<i class="fas fa-chevron-down"></i>');
+            symbolInputMode = true;
+        }
+    }
+
+    function selectSymbolFromDropdown() {
+        const selectedSymbol = $('#symbolDropdown').val();
+        if (selectedSymbol) {
+            $('#symbolInput').val(selectedSymbol);
+            applyFilters();
+        }
+    }
+
+    function applyFilters() {
+        const accountId = $('#accountFilter').val();
+        const type = $('#typeFilter').val();
+        let symbols = [];
+        
+        // Get symbols from input or dropdown
+        if (symbolInputMode) {
+            const symbolText = $('#symbolInput').val().trim();
+            if (symbolText) {
+                symbols = symbolText.split(',').map(s => s.trim().toUpperCase()).filter(s => s);
+            }
+        } else {
+            const dropdownSymbol = $('#symbolDropdown').val();
+            if (dropdownSymbol) {
+                symbols = [dropdownSymbol];
+            }
+        }
+
+        filterPositions(accountId, type, symbols);
+        updateSummaryCards();
+        updateFilterStatus();
+    }
+
+    function filterPositions(accountId, type, symbols) {
+        if (currentView === 'table') {
+            $('#positionsTable tbody tr').each(function() {
+                const row = $(this);
+                const rowSymbol = row.data('symbol');
+                const rowType = row.data('type');
+                const rowAccountId = row.data('account').toString();
+
+                let showRow = true;
+
+                // Check account filter
+                if (accountId && rowAccountId !== accountId) {
+                    showRow = false;
+                }
+
+                // Check type filter
+                if (showRow && type && rowType !== type) {
+                    showRow = false;
+                }
+
+                // Check symbol filter
+                if (showRow && symbols.length > 0) {
+                    const symbolMatch = symbols.some(filterSymbol => 
+                        rowSymbol.toUpperCase().includes(filterSymbol.toUpperCase())
+                    );
+                    if (!symbolMatch) {
+                        showRow = false;
+                    }
+                }
+
+                if (showRow) {
+                    row.show();
+                } else {
+                    row.hide();
+                }
+            });
+        } else {
+            $('#positionCards .col-xl-4').each(function() {
+                const card = $(this).find('.position-card');
+                const cardSymbol = card.data('symbol');
+                const cardType = card.data('type');
+                const cardAccountId = card.data('account').toString();
+
+                let showCard = true;
+
+                // Check account filter
+                if (accountId && cardAccountId !== accountId) {
+                    showCard = false;
+                }
+
+                // Check type filter
+                if (showCard && type && cardType !== type) {
+                    showCard = false;
+                }
+
+                // Check symbol filter
+                if (showCard && symbols.length > 0) {
+                    const symbolMatch = symbols.some(filterSymbol => 
+                        cardSymbol.toUpperCase().includes(filterSymbol.toUpperCase())
+                    );
+                    if (!symbolMatch) {
+                        showCard = false;
+                    }
+                }
+
+                if (showCard) {
+                    $(this).show();
+                } else {
+                    $(this).hide();
+                }
+            });
+        }
+    }
+
+    function clearAllFilters() {
+        $('#accountFilter').val('');
+        $('#typeFilter').val('');
+        $('#symbolInput').val('');
+        $('#symbolDropdown').val('');
+        
+        // Show all positions
+        if (currentView === 'table') {
+            $('#positionsTable tbody tr').show();
+        } else {
+            $('#positionCards .col-xl-4').show();
+        }
+        
+        updateSummaryCards();
+        updateFilterStatus();
+    }
+
+    function updateFilterStatus() {
+        const accountFilter = $('#accountFilter').val();
+        const typeFilter = $('#typeFilter').val();
+        const symbolFilter = $('#symbolInput').val().trim();
+        
+        let visibleCount;
+        if (currentView === 'table') {
+            visibleCount = $('#positionsTable tbody tr:visible').length;
+        } else {
+            visibleCount = $('#positionCards .col-xl-4:visible').length;
+        }
+        
+        const activeFilters = [accountFilter, typeFilter, symbolFilter].filter(f => f).length;
+        
+        let statusText = `Showing ${visibleCount} position${visibleCount !== 1 ? 's' : ''}`;
+        if (activeFilters > 0) {
+            statusText += ` (${activeFilters} filter${activeFilters > 1 ? 's' : ''} applied)`;
+        }
+        
+        $('#filterStatus').text(statusText);
+    }
+
+    function applySorting() {
+        const sortBy = $('#sortBy').val();
+        if (currentView === 'table') {
+            sortTable(sortBy);
+        }
+        showSuccess(`Sorted by ${sortBy}`);
     }
 
     function toggleView(view) {
@@ -400,53 +652,9 @@
             $('#cardsViewBtn').removeClass('btn-outline-secondary').addClass('btn-secondary');
             $('#tableViewBtn').removeClass('btn-secondary').addClass('btn-outline-secondary');
         }
-    }
-
-    function applyFilters() {
-        const accountId = $('#accountFilter').val();
-        const type = $('#typeFilter').val();
         
-        let url = new URL(window.location);
-        
-        if (accountId) {
-            url.searchParams.set('account_id', accountId);
-        } else {
-            url.searchParams.delete('account_id');
-        }
-        
-        if (type && type !== 'all') {
-            url.searchParams.set('type', type);
-        } else {
-            url.searchParams.delete('type');
-        }
-        
-        window.location.href = url.toString();
-    }
-
-    function filterBySymbol() {
-        const selectedSymbol = $('#searchSymbol').val();
-        
-        if (currentView === 'table') {
-            $('#positionsTable tbody tr').each(function() {
-                const symbol = $(this).data('symbol');
-                if (!selectedSymbol || symbol === selectedSymbol) {
-                    $(this).show();
-                } else {
-                    $(this).hide();
-                }
-            });
-        } else {
-            $('#positionCards .position-card').each(function() {
-                const symbol = $(this).data('symbol');
-                if (!selectedSymbol || symbol === selectedSymbol) {
-                    $(this).closest('.col-xl-4').show();
-                } else {
-                    $(this).closest('.col-xl-4').hide();
-                }
-            });
-        }
-        
-        updateSummaryCards();
+        // Update filter status after view change
+        updateFilterStatus();
     }
 
     function sortTable(column) {
@@ -465,27 +673,7 @@
                     aVal = $(a).data('symbol');
                     bVal = $(b).data('symbol');
                     break;
-                case 'account':
-                    aVal = $(a).find('td:nth-child(2)').text();
-                    bVal = $(b).find('td:nth-child(2)').text();
-                    break;
-                case 'type':
-                    aVal = $(a).data('type');
-                    bVal = $(b).data('type');
-                    break;
-                case 'quantity':
-                    aVal = parseFloat($(a).find('td:nth-child(4)').text().replace(/,/g, '')) || 0;
-                    bVal = parseFloat($(b).find('td:nth-child(4)').text().replace(/,/g, '')) || 0;
-                    break;
-                case 'avgPrice':
-                    aVal = parseFloat($(a).find('td:nth-child(5)').text().replace(/[$,]/g, '')) || 0;
-                    bVal = parseFloat($(b).find('td:nth-child(5)').text().replace(/[$,]/g, '')) || 0;
-                    break;
-                case 'currentPrice':
-                    aVal = parseFloat($(a).find('td:nth-child(6)').text().replace(/[$,]/g, '')) || 0;
-                    bVal = parseFloat($(b).find('td:nth-child(6)').text().replace(/[$,]/g, '')) || 0;
-                    break;
-                case 'currentValue':
+                case 'value':
                     aVal = parseFloat($(a).find('td:nth-child(7)').text().replace(/[$,]/g, '')) || 0;
                     bVal = parseFloat($(b).find('td:nth-child(7)').text().replace(/[$,]/g, '')) || 0;
                     break;
@@ -511,17 +699,6 @@
         });
         
         tbody.empty().append(rows);
-        
-        // Update sort indicators
-        table.find('th i').removeClass('fa-sort-up fa-sort-down').addClass('fa-sort');
-        table.find(`th:contains('${column}') i`).removeClass('fa-sort')
-            .addClass(sortDirection[column] === 'asc' ? 'fa-sort-up' : 'fa-sort-down');
-    }
-
-    function sortPositions() {
-        const sortBy = $('#sortBy').val();
-        // Implementation depends on current view and sort criteria
-        showSuccess('Sorting by ' + sortBy);
     }
 
     function updateSummaryCards() {
@@ -531,7 +708,7 @@
         if (currentView === 'table') {
             visibleRows = $('#positionsTable tbody tr:visible');
         } else {
-            visibleRows = $('#positionCards .position-card:visible');
+            visibleRows = $('#positionCards .position-card:visible').parent();
         }
         
         let totalCount = visibleRows.length;
@@ -540,12 +717,23 @@
         let totalReturn = 0;
         
         visibleRows.each(function() {
-            // Extract values and sum them up
-            // This is a simplified version - you might need more complex parsing
+            if (currentView === 'table') {
+                const valueText = $(this).find('td:nth-child(7)').text().replace(/[$,]/g, '');
+                const dayChangeText = $(this).find('td:nth-child(8) .badge').text().replace(/[$,+]/g, '');
+                const returnText = $(this).find('td:nth-child(9) .badge').text().replace(/[$,+]/g, '');
+                
+                totalValue += parseFloat(valueText) || 0;
+                totalDayChange += parseFloat(dayChangeText) || 0;
+                totalReturn += parseFloat(returnText) || 0;
+            }
         });
         
         $('#totalPositionsCount').text(totalCount);
-        // Update other summary cards as needed
+        if (totalCount > 0) {
+            $('#totalValue').text(formatCurrency(totalValue));
+            $('#totalDayChange').text(formatCurrency(totalDayChange, true));
+            $('#totalReturn').text(formatCurrency(totalReturn, true));
+        }
     }
 
     function viewPositionDetails(positionId) {
@@ -618,7 +806,7 @@
         // Refresh all account data
         fetch('/api/sync-all', { method: 'POST' })
             .then(response => response.json())
-            .then data => {
+            .then(data => {
                 hideLoading();
                 if (data.success) {
                     showSuccess('Positions refreshed successfully');
@@ -637,12 +825,17 @@
     function exportPositions() {
         const accountFilter = $('#accountFilter').val();
         const typeFilter = $('#typeFilter').val();
+        const symbolFilter = $('#symbolInput').val().trim();
         
         let url = '/api/positions/export';
         let params = new URLSearchParams();
         
         if (accountFilter) params.append('account_id', accountFilter);
-        if (typeFilter && typeFilter !== 'all') params.append('type', typeFilter);
+        if (typeFilter) params.append('type', typeFilter);
+        if (symbolFilter) {
+            const symbols = symbolFilter.split(',').map(s => s.trim()).filter(s => s);
+            if (symbols.length > 0) params.append('symbols', symbols.join(','));
+        }
         
         if (params.toString()) {
             url += '?' + params.toString();

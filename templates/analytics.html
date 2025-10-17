@@ -710,7 +710,7 @@
                 <tr>
                     <td><span class="badge bg-primary">${item.trans_code}</span></td>
                     <td>${item.count}</td>
-                    <td>$${item.total_amount.toFixed(2)}</td>
+                    <td>$${Math.abs(item.total_amount).toFixed(2)}</td>
                     <td>$${item.avg_price.toFixed(2)}</td>
                     <td>${item.unique_symbols}</td>
                     <td>${item.date_range.start} to ${item.date_range.end}</td>
@@ -728,7 +728,7 @@
             data: {
                 labels: transCodeData.map(item => item.trans_code),
                 datasets: [{
-                    data: transCodeData.map(item => item.total_amount),
+                    data: transCodeData.map(item => Math.abs(item.total_amount)),
                     backgroundColor: [
                         '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0',
                         '#9966FF', '#FF9F40', '#FF6384', '#C9CBCF'
@@ -835,7 +835,7 @@
                             </thead>
                             <tbody>
                                 ${Object.entries(data.trans_code_breakdown).map(([code, stats]) => 
-                                    `<tr><td>${code}</td><td>${stats.count}</td><td>$${stats.total_amount.toFixed(2)}</td><td>${stats.total_quantity}</td></tr>`
+                                    `<tr><td>${code}</td><td>${stats.count}</td><td>$${Math.abs(stats.total_amount).toFixed(2)}</td><td>${stats.total_quantity}</td></tr>`
                                 ).join('')}
                             </tbody>
                         </table>

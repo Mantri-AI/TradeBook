@@ -23,24 +23,20 @@
 <!-- Filters Section -->
 <div class="filter-section">
     <div class="row">
-        <div class="col-md-3">
+        <div class="col-md-2">
             <label for="accountFilter" class="form-label">Account</label>
             <select class="form-select" id="accountFilter" onchange="applyFilters()">
                 <option value="">All Accounts</option>
-                {% for account in accounts %}
-                    <option value="{{ account.id }}" {% if selected_account == account.id|string %}selected{% endif %}>
-                        {{ account.name }}
-                    </option>
-                {% endfor %}
+                <!-- Options will be populated by JavaScript -->
             </select>
         </div>
         <div class="col-md-2">
             <label for="timeRange" class="form-label">Time Range</label>
             <select class="form-select" id="timeRange" onchange="applyFilters()">
-                <option value="7" {% if days == 7 %}selected{% endif %}>Last 7 Days</option>
-                <option value="30" {% if days == 30 %}selected{% endif %}>Last 30 Days</option>
-                <option value="90" {% if days == 90 %}selected{% endif %}>Last 90 Days</option>
-                <option value="365" {% if days == 365 %}selected{% endif %}>Last Year</option>
+                <option value="7">Last 7 Days</option>
+                <option value="30" selected>Last 30 Days</option>
+                <option value="90">Last 90 Days</option>
+                <option value="365">Last Year</option>
                 <option value="all">All Time</option>
             </select>
         </div>
@@ -48,34 +44,54 @@
             <label for="sideFilter" class="form-label">Side</label>
             <select class="form-select" id="sideFilter" onchange="applyFilters()">
                 <option value="">All</option>
-                <option value="buy">Buy Only</option>
-                <option value="sell">Sell Only</option>
+                <!-- Options will be populated by JavaScript -->
             </select>
         </div>
         <div class="col-md-2">
             <label for="transCodeFilter" class="form-label">Trans Code</label>
             <select class="form-select" id="transCodeFilter" onchange="applyFilters()">
                 <option value="">All Codes</option>
-                <option value="BTO">BTO</option>
-                <option value="STO">STO</option>
-                <option value="BTC">BTC</option>
-                <option value="STC">STC</option>
+                <!-- Options will be populated by JavaScript -->
             </select>
         </div>
         <div class="col-md-3">
-            <label for="searchSymbol" class="form-label">Search Symbol</label>
-            <input type="text" class="form-control search-box" id="searchSymbol" 
-                   placeholder="AAPL, TSLA, etc." value="{{ search }}" onkeyup="filterBySymbol()">
+            <label for="symbolFilter" class="form-label">Symbol(s)</label>
+            <div class="input-group">
+                <select class="form-select" id="symbolDropdown" onchange="selectSymbolFromDropdown()" style="display: none;">
+                    <option value="">Select Symbol</option>
+                    <!-- Options will be populated by JavaScript -->
+                </select>
+                <input type="text" class="form-control" id="symbolInput" placeholder="Enter symbols (comma separated) or use dropdown" onchange="applyFilters()" />
+                <button class="btn btn-outline-secondary" type="button" id="symbolToggleBtn" onclick="toggleSymbolInput()">
+                    <i class="fas fa-chevron-down"></i>
+                </button>
+            </div>
         </div>
+        <div class="col-md-1">
+            <label class="form-label">&nbsp;</label>
+            <div class="d-grid">
+                <button class="btn btn-outline-secondary btn-sm" onclick="clearAllFilters()" title="Clear All Filters">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+    <div class="row mt-2">
         <div class="col-md-2">
             <label for="sortBy" class="form-label">Sort By</label>
-            <select class="form-select" id="sortBy" onchange="sortTrades()">
+            <select class="form-select" id="sortBy" onchange="applySorting()">
                 <option value="date">Date (Latest)</option>
                 <option value="symbol">Symbol</option>
                 <option value="amount">Amount</option>
                 <option value="quantity">Quantity</option>
                 <option value="trans_code">Trans Code</option>
             </select>
+        </div>
+        <div class="col-md-10">
+            <label class="form-label">&nbsp;</label>
+            <div class="d-flex align-items-center">
+                <small class="text-muted" id="filterStatus">Loading trades...</small>
+            </div>
         </div>
     </div>
 </div>
@@ -93,7 +109,7 @@
         <div class="card-body">
             <div class="metric-label">Total Volume</div>
             <div class="metric-value" id="totalVolume">
-                {{ "${:,.2f}".format(trades|sum(attribute='total_amount') or 0) }}
+                {{ "${:,.2f}".format((trades|map(attribute='total_amount')|map('abs')|sum) or 0) }}
             </div>
             <div class="small text-muted">Traded Value</div>
         </div>
@@ -203,7 +219,7 @@
                             <td>{{ "{:,.2f}".format(trade.quantity or 0) }}</td>
                             <td>{{ "${:,.4f}".format(trade.price or 0) }}</td>
                             <td>
-                                <strong>{{ "${:,.2f}".format(trade.total_amount or 0) }}</strong>
+                                <strong>{{ "${:,.2f}".format((trade.total_amount or 0)|abs) }}</strong>
                             </td>
                             <td>
                                 <span class="badge bg-{{ 'info' if trade.import_source == 'csv_import' else 'secondary' }}">
@@ -498,16 +514,271 @@
 
 {% endblock %}
 
+{% block extra_css %}
+<style>
+    .filter-section {
+        background-color: #f8f9fa;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+    }
+
+    .filter-section .input-group .form-select {
+        border-top-right-radius: 0;
+        border-bottom-right-radius: 0;
+    }
+
+    .filter-section .input-group .form-control {
+        border-left: 0;
+        border-right: 0;
+    }
+
+    .filter-section .input-group .btn {
+        border-top-left-radius: 0;
+        border-bottom-left-radius: 0;
+    }
+
+    #filterStatus {
+        font-style: italic;
+        font-size: 0.9rem;
+    }
+
+    .symbol-toggle-btn {
+        min-width: 40px;
+    }
+
+    .trade-row:hover {
+        background-color: rgba(52, 152, 219, 0.05);
+    }
+
+    .metric-card {
+        transition: transform 0.2s ease;
+    }
+
+    .metric-card:hover {
+        transform: translateY(-2px);
+    }
+</style>
+{% endblock %}
+
 {% block extra_js %}
 <script>
     let symbolChart, volumeChart;
     let currentView = 'detailed';
     let sortDirection = {};
+    let filterData = {};
+    let symbolInputMode = true; // true for input, false for dropdown
 
     $(document).ready(function() {
         initializeCharts();
+        loadFilterData();
         generateSymbolSummary();
     });
+
+    function loadFilterData() {
+        // Load all filter options once from backend
+        fetch('/api/trades/filters/values')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    filterData = data;
+                    populateFilterOptions();
+                    updateFilterStatus();
+                }
+            })
+            .catch(error => {
+                console.error('Error loading filter data:', error);
+                $('#filterStatus').text('Error loading filter options');
+            });
+    }
+
+    function populateFilterOptions() {
+        // Populate account filter
+        const accountSelect = $('#accountFilter');
+        accountSelect.find('option:not(:first)').remove(); // Keep "All Accounts" option
+        if (filterData.accounts) {
+            filterData.accounts.forEach(account => {
+                accountSelect.append(`<option value="${account.id}">${account.name}</option>`);
+            });
+        }
+
+        // Populate side filter
+        const sideSelect = $('#sideFilter');
+        sideSelect.find('option:not(:first)').remove(); // Keep "All" option
+        if (filterData.sides) {
+            filterData.sides.forEach(side => {
+                const displayName = side.charAt(0).toUpperCase() + side.slice(1);
+                sideSelect.append(`<option value="${side}">${displayName}</option>`);
+            });
+        }
+
+        // Populate transaction code filter
+        const transCodeSelect = $('#transCodeFilter');
+        transCodeSelect.find('option:not(:first)').remove(); // Keep "All Codes" option
+        if (filterData.trans_codes) {
+            filterData.trans_codes.forEach(code => {
+                transCodeSelect.append(`<option value="${code}">${code}</option>`);
+            });
+        }
+
+        // Populate symbol dropdown
+        const symbolDropdown = $('#symbolDropdown');
+        symbolDropdown.find('option:not(:first)').remove(); // Keep "Select Symbol" option
+        if (filterData.symbols) {
+            filterData.symbols.forEach(symbol => {
+                symbolDropdown.append(`<option value="${symbol}">${symbol}</option>`);
+            });
+        }
+    }
+
+    function toggleSymbolInput() {
+        const symbolInput = $('#symbolInput');
+        const symbolDropdown = $('#symbolDropdown');
+        const toggleBtn = $('#symbolToggleBtn');
+
+        if (symbolInputMode) {
+            // Switch to dropdown mode
+            symbolInput.hide();
+            symbolDropdown.show();
+            toggleBtn.html('<i class="fas fa-keyboard"></i>');
+            symbolInputMode = false;
+        } else {
+            // Switch to input mode
+            symbolDropdown.hide();
+            symbolInput.show().focus();
+            toggleBtn.html('<i class="fas fa-chevron-down"></i>');
+            symbolInputMode = true;
+        }
+    }
+
+    function selectSymbolFromDropdown() {
+        const selectedSymbol = $('#symbolDropdown').val();
+        if (selectedSymbol) {
+            $('#symbolInput').val(selectedSymbol);
+            applyFilters();
+        }
+    }
+
+    function applyFilters() {
+        const accountId = $('#accountFilter').val();
+        const timeRange = $('#timeRange').val();
+        const side = $('#sideFilter').val();
+        const transCode = $('#transCodeFilter').val();
+        let symbols = [];
+        
+        // Get symbols from input or dropdown
+        if (symbolInputMode) {
+            const symbolText = $('#symbolInput').val().trim();
+            if (symbolText) {
+                symbols = symbolText.split(',').map(s => s.trim().toUpperCase()).filter(s => s);
+            }
+        } else {
+            const dropdownSymbol = $('#symbolDropdown').val();
+            if (dropdownSymbol) {
+                symbols = [dropdownSymbol];
+            }
+        }
+
+        filterTrades(accountId, timeRange, side, transCode, symbols);
+        updateSummaryCards();
+        updateFilterStatus();
+    }
+
+    function filterTrades(accountId, timeRange, side, transCode, symbols) {
+        // Filter trades table rows
+        $('#tradesTable tbody tr').each(function() {
+            const row = $(this);
+            const rowSymbol = row.find('td:nth-child(2)').text().trim();
+            const rowSide = row.find('td:nth-child(4)').text().trim().toLowerCase();
+            const rowTransCode = row.find('td:nth-child(5)').text().trim();
+            const rowAccountId = row.data('account-id') ? row.data('account-id').toString() : '';
+            const rowDate = new Date(row.find('td:nth-child(1)').text().trim());
+
+            let showRow = true;
+
+            // Check account filter
+            if (accountId && rowAccountId !== accountId) {
+                showRow = false;
+            }
+
+            // Check time range filter
+            if (showRow && timeRange && timeRange !== 'all') {
+                const daysBack = parseInt(timeRange);
+                const cutoffDate = new Date();
+                cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+                if (rowDate < cutoffDate) {
+                    showRow = false;
+                }
+            }
+
+            // Check side filter
+            if (showRow && side && rowSide !== side) {
+                showRow = false;
+            }
+
+            // Check transaction code filter
+            if (showRow && transCode && rowTransCode !== transCode) {
+                showRow = false;
+            }
+
+            // Check symbol filter
+            if (showRow && symbols.length > 0) {
+                const symbolMatch = symbols.some(filterSymbol => 
+                    rowSymbol.toUpperCase().includes(filterSymbol.toUpperCase())
+                );
+                if (!symbolMatch) {
+                    showRow = false;
+                }
+            }
+
+            if (showRow) {
+                row.show();
+            } else {
+                row.hide();
+            }
+        });
+    }
+
+    function clearAllFilters() {
+        $('#accountFilter').val('');
+        $('#timeRange').val('30');
+        $('#sideFilter').val('');
+        $('#transCodeFilter').val('');
+        $('#symbolInput').val('');
+        $('#symbolDropdown').val('');
+        
+        // Show all trades
+        $('#tradesTable tbody tr').show();
+        
+        updateSummaryCards();
+        updateFilterStatus();
+    }
+
+    function updateFilterStatus() {
+        const accountFilter = $('#accountFilter').val();
+        const timeRange = $('#timeRange').val();
+        const sideFilter = $('#sideFilter').val();
+        const transCodeFilter = $('#transCodeFilter').val();
+        const symbolFilter = $('#symbolInput').val().trim();
+        
+        const visibleCount = $('#tradesTable tbody tr:visible').length;
+        
+        const activeFilters = [accountFilter, sideFilter, transCodeFilter, symbolFilter].filter(f => f).length;
+        if (timeRange !== '30') activeFilters++; // Default is 30 days
+        
+        let statusText = `Showing ${visibleCount} trade${visibleCount !== 1 ? 's' : ''}`;
+        if (activeFilters > 0) {
+            statusText += ` (${activeFilters} filter${activeFilters > 1 ? 's' : ''} applied)`;
+        }
+        
+        $('#filterStatus').text(statusText);
+    }
+
+    function applySorting() {
+        const sortBy = $('#sortBy').val();
+        sortTable(sortBy);
+        showSuccess(`Sorted by ${sortBy}`);
+    }
 
     function toggleView(view) {
         currentView = view;
@@ -804,7 +1075,7 @@
                     <table class="table table-sm">
                         <tr><td><strong>Quantity:</strong></td><td>${trade.quantity}</td></tr>
                         <tr><td><strong>Price:</strong></td><td>${formatCurrency(trade.price)}</td></tr>
-                        <tr><td><strong>Total Amount:</strong></td><td>${formatCurrency(trade.total_amount)}</td></tr>
+                        <tr><td><strong>Total Amount:</strong></td><td>${formatCurrency(Math.abs(trade.total_amount))}</td></tr>
                         <tr><td><strong>Fees:</strong></td><td>${formatCurrency(trade.fees)}</td></tr>
                     </table>
                 </div>

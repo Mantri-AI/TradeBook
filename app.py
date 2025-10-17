@@ -557,6 +557,13 @@ def api_create_trade():
         except ValueError as e:
             return jsonify({'success': False, 'message': f'Invalid date format: {str(e)}'}), 400
         
+        # Calculate total amount based on side (negative for buy, positive for sell)
+        amount = float(data['quantity']) * float(data['price'])
+        if data['side'] == 'buy':
+            total_amount = -abs(amount)
+        else:  # sell
+            total_amount = abs(amount)
+
         # Create trade object
         trade = Trade(
             account_id=data['account_id'],
@@ -565,7 +572,7 @@ def api_create_trade():
             side=data['side'],
             quantity=float(data['quantity']),
             price=float(data['price']),
-            total_amount=float(data['quantity']) * float(data['price']),
+            total_amount=total_amount,
             activity_date=activity_date,
             executed_at=executed_at,
             trans_code=data['trans_code'],
@@ -628,9 +635,13 @@ def api_update_trade(trade_id):
         if 'instrument_type' in data:
             trade.instrument_type = data['instrument_type']
         
-        # Recalculate total amount
-        if 'quantity' in data or 'price' in data:
-            trade.total_amount = trade.quantity * trade.price
+        # Recalculate total amount based on side
+        if 'quantity' in data or 'price' in data or 'side' in data:
+            amount = trade.quantity * trade.price
+            if trade.side == 'buy':
+                trade.total_amount = -abs(amount)
+            else:  # sell
+                trade.total_amount = abs(amount)
         
         # Handle dates
         if 'activity_date' in data:
@@ -683,6 +694,201 @@ def api_delete_trade(trade_id):
         db.session.rollback()
         logger.error(f"Error deleting trade: {str(e)}")
         return jsonify({'success': False, 'message': f'Error deleting trade: {str(e)}'}), 500
+
+@app.route('/api/positions/filters/values')
+def api_positions_filter_values():
+    """Get unique values for position filters"""
+    try:
+        # Get unique symbols from active positions
+        symbols = db.session.query(Position.symbol).join(Account).filter(
+            Account.is_active == True,
+            Position.quantity > 0
+        ).distinct().order_by(Position.symbol).all()
+        
+        # Get unique accounts
+        accounts = db.session.query(Account.id, Account.name).filter(
+            Account.is_active == True
+        ).order_by(Account.name).all()
+        
+        # Get unique instrument types
+        instrument_types = db.session.query(Position.instrument_type).join(Account).filter(
+            Account.is_active == True,
+            Position.quantity > 0
+        ).distinct().order_by(Position.instrument_type).all()
+        
+        symbol_list = [symbol[0] for symbol in symbols]
+        account_list = [{'id': acc[0], 'name': acc[1]} for acc in accounts]
+        type_list = [t[0] for t in instrument_types if t[0]]
+        
+        return jsonify({
+            'success': True,
+            'symbols': symbol_list,
+            'accounts': account_list,
+            'instrument_types': type_list
+        })
+    except Exception as e:
+        logger.error(f"Error getting filter values: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/trades/filters/values')
+def api_trades_filter_values():
+    """Get unique values for trade filters"""
+    try:
+        # Get unique symbols from trades
+        symbols = db.session.query(Trade.symbol).join(Account).filter(
+            Account.is_active == True
+        ).distinct().order_by(Trade.symbol).all()
+        
+        # Get unique accounts
+        accounts = db.session.query(Account.id, Account.name).filter(
+            Account.is_active == True
+        ).order_by(Account.name).all()
+        
+        # Get unique sides
+        sides = db.session.query(Trade.side).join(Account).filter(
+            Account.is_active == True
+        ).distinct().order_by(Trade.side).all()
+        
+        # Get unique transaction codes
+        trans_codes = db.session.query(Trade.trans_code).join(Account).filter(
+            Account.is_active == True
+        ).distinct().order_by(Trade.trans_code).all()
+        
+        # Get unique instrument types
+        instrument_types = db.session.query(Trade.instrument_type).join(Account).filter(
+            Account.is_active == True
+        ).distinct().order_by(Trade.instrument_type).all()
+        
+        symbol_list = [symbol[0] for symbol in symbols if symbol[0]]
+        account_list = [{'id': acc[0], 'name': acc[1]} for acc in accounts]
+        side_list = [side[0] for side in sides if side[0]]
+        trans_code_list = [tc[0] for tc in trans_codes if tc[0]]
+        type_list = [t[0] for t in instrument_types if t[0]]
+        
+        return jsonify({
+            'success': True,
+            'symbols': symbol_list,
+            'accounts': account_list,
+            'sides': side_list,
+            'trans_codes': trans_code_list,
+            'instrument_types': type_list
+        })
+    except Exception as e:
+        logger.error(f"Error getting trade filter values: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/positions/<int:position_id>')
+def api_position_detail(position_id):
+    """Get position details"""
+    try:
+        position = Position.query.join(Account).filter(
+            Position.id == position_id,
+            Account.is_active == True
+        ).first()
+        
+        if not position:
+            return jsonify({'success': False, 'message': 'Position not found'}), 404
+        
+        position_data = position.to_dict()
+        position_data['account_name'] = position.account.name
+        
+        return jsonify(position_data)
+    except Exception as e:
+        logger.error(f"Error getting position details: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/positions/prices')
+def api_positions_prices():
+    """Get updated prices for all positions"""
+    try:
+        positions = Position.query.join(Account).filter(
+            Account.is_active == True,
+            Position.quantity > 0
+        ).all()
+        
+        prices = {}
+        for position in positions:
+            prices[position.id] = {
+                'current_price': position.current_price,
+                'current_value': position.current_value,
+                'day_change': position.day_change,
+                'day_change_percent': position.day_change_percent
+            }
+        
+        return jsonify({
+            'success': True,
+            'prices': prices,
+            'last_updated': datetime.utcnow().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error getting position prices: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/positions/export')
+def api_positions_export():
+    """Export positions to CSV"""
+    try:
+        account_id = request.args.get('account_id')
+        position_type = request.args.get('type', 'all')
+        
+        query = Position.query.join(Account)
+        
+        if account_id:
+            query = query.filter(Account.id == account_id)
+        
+        if position_type == 'stocks':
+            query = query.filter(Position.instrument_type == 'stock')
+        elif position_type == 'options':
+            query = query.filter(Position.instrument_type == 'option')
+        
+        positions = query.filter(Account.is_active == True).all()
+        
+        # Create CSV data
+        import io
+        import csv
+        
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Write header
+        writer.writerow([
+            'Symbol', 'Account', 'Type', 'Quantity', 'Avg Buy Price', 'Current Price',
+            'Current Value', 'Day Change', 'Day Change %', 'Total Return', 'Total Return %',
+            'Strike Price', 'Option Type', 'Expiration Date', 'Last Updated'
+        ])
+        
+        # Write data
+        for position in positions:
+            writer.writerow([
+                position.symbol,
+                position.account.name,
+                position.instrument_type,
+                position.quantity,
+                position.average_buy_price,
+                position.current_price,
+                position.current_value,
+                position.day_change,
+                position.day_change_percent,
+                position.total_return,
+                position.total_return_percent,
+                position.strike_price if position.instrument_type == 'option' else '',
+                position.option_type if position.instrument_type == 'option' else '',
+                position.expiration_date.strftime('%Y-%m-%d') if position.expiration_date else '',
+                position.updated_at.strftime('%Y-%m-%d %H:%M:%S')
+            ])
+        
+        output.seek(0)
+        
+        from flask import Response
+        return Response(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={'Content-Disposition': f'attachment; filename=positions_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'}
+        )
+        
+    except Exception as e:
+        logger.error(f"Error exporting positions: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/positions/top')
 def api_positions_top():

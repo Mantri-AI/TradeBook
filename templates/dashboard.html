@@ -388,7 +388,7 @@
                         <div class="small text-muted">${trade.quantity} shares @ ${formatCurrency(trade.price)}</div>
                     </div>
                     <div class="text-end">
-                        <div class="fw-bold">${formatCurrency(trade.total_amount)}</div>
+                        <div class="fw-bold">${formatCurrency(Math.abs(trade.total_amount))}</div>
                         <div class="small text-muted">${new Date(trade.executed_at).toLocaleDateString()}</div>
                     </div>
                 </div>
