@@ -143,12 +143,23 @@ class CSVImportService:
         trans_code = str(row['Trans Code']).strip().upper()
         
         # Parse financial data
-        quantity = abs(float(row['Quantity'])) if pd.notna(row['Quantity']) else 0
-        price = abs(float(row['Price'])) if pd.notna(row['Price']) else 0
+        # Handle quantity: remove 'S' suffix if present
+        quantity_str = str(row['Quantity']).strip().upper()
+        if quantity_str.endswith('S'):
+            quantity_str = quantity_str[:-1]
+        quantity = abs(float(quantity_str)) if quantity_str and quantity_str != 'NAN' else 0
         
-        # Parse amount (remove parentheses and convert)
+        # Handle price: remove '$' and clean up
+        price_str = str(row['Price']).strip()
+        price_str = price_str.replace('$', '').replace(',', '')
+        price = abs(float(price_str)) if price_str and price_str != 'nan' else 0
+        
+        # Parse amount (remove '$', handle parentheses as negative)
         amount_str = str(row['Amount']).strip()
-        amount_str = amount_str.replace('$', '').replace(',', '').replace('(', '-').replace(')', '')
+        amount_str = amount_str.replace('$', '').replace(',', '')
+        # Handle parentheses as negative values
+        if amount_str.startswith('(') and amount_str.endswith(')'):
+            amount_str = '-' + amount_str[1:-1]
         total_amount = float(amount_str) if amount_str and amount_str != 'nan' else 0
         
         # Determine side based on trans code and amount
