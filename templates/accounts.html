@@ -402,6 +402,24 @@
         activeRequests.delete(requestKey);
     }
 
+    // Helper function to format file size
+    function formatFileSize(bytes) {
+        if (!bytes || bytes === 0) return '0 B';
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(1024));
+        return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+    }
+
+    // Helper function to get import status color
+    function getImportStatusColor(status) {
+        switch(status) {
+            case 'completed': return 'success';
+            case 'failed': return 'danger';
+            case 'processing': return 'warning';
+            default: return 'secondary';
+        }
+    }
+
     $(document).ready(function() {
         // Handle add account form submission - prevent multiple submissions
         $('#addAccountForm').off('submit').on('submit', function(e) {
@@ -799,6 +817,51 @@
                                                 <td>${trade.side}</td>
                                                 <td>${trade.quantity}</td>
                                                 <td>${formatCurrency(trade.price || 0)}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    ` : ''}
+                    ${data.import_history && data.import_history.length > 0 ? `
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <h6>Import History</h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>File</th>
+                                            <th>Status</th>
+                                            <th>Records</th>
+                                            <th>Notes</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${data.import_history.map(imp => `
+                                            <tr>
+                                                <td>${new Date(imp.started_at).toLocaleDateString()}</td>
+                                                <td>
+                                                    <div>${imp.filename}</div>
+                                                    <small class="text-muted">${formatFileSize(imp.file_size)}</small>
+                                                </td>
+                                                <td>
+                                                    <span class="badge bg-${getImportStatusColor(imp.status)}">${imp.status}</span>
+                                                </td>
+                                                <td>
+                                                    <small>
+                                                        ${imp.records_imported || 0} imported<br>
+                                                        ${imp.records_skipped || 0} skipped
+                                                        ${imp.records_errors > 0 ? '<br>' + imp.records_errors + ' errors' : ''}
+                                                    </small>
+                                                </td>
+                                                <td>
+                                                    <small class="text-muted">${imp.import_notes || '-'}</small>
+                                                    ${imp.error_message ? '<br><small class="text-danger">' + imp.error_message + '</small>' : ''}
+                                                </td>
                                             </tr>
                                         `).join('')}
                                     </tbody>

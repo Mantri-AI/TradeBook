@@ -56,7 +56,7 @@ class CSVImportService:
         
         return '\n'.join(valid_lines)
     
-    def import_fidelity_csv(self, csv_content: str, account: Account) -> Dict[str, Any]:
+    def import_fidelity_csv(self, csv_content: str, account: Account, overwrite_existing: bool = False) -> Dict[str, Any]:
         """
         Import Fidelity CSV data
         
@@ -128,7 +128,14 @@ class CSVImportService:
                     ).first()
                     
                     if existing_trade:
-                        duplicates_count += 1
+                        if overwrite_existing:
+                            # Update existing trade
+                            for key, value in trade_data.items():
+                                if key != 'account_id':  # Don't change account_id
+                                    setattr(existing_trade, key, value)
+                            imported_count += 1
+                        else:
+                            duplicates_count += 1
                         continue
                     
                     # Create new trade
@@ -149,17 +156,27 @@ class CSVImportService:
             
             db.session.commit()
             
+            # Create standardized result message for Fidelity
+            message_parts = []
+            if imported_count > 0:
+                message_parts.append(f'{imported_count} trades imported')
+            if duplicates_count > 0:
+                action = 'updated' if overwrite_existing else 'skipped'
+                message_parts.append(f'{duplicates_count} duplicates {action}')
+            if skipped_rows > 0:
+                message_parts.append(f'{skipped_rows} rows skipped')
+            if len(errors) > 0:
+                message_parts.append(f'{len(errors)} errors')
+                
             result = {
                 'success': True,
-                'imported_count': imported_count,
-                'duplicates_count': duplicates_count,
-                'errors_count': len(errors),
-                'errors': errors[:10]  # Return first 10 errors
+                'message': ', '.join(message_parts) if message_parts else 'No trades processed',
+                'total_processed': imported_count + duplicates_count + skipped_rows + len(errors),
+                'imported': imported_count,
+                'skipped': duplicates_count + skipped_rows,
+                'errors': len(errors),
+                'error_details': errors[:10]  # Return first 10 errors
             }
-            
-            if skipped_rows > 0:
-                result['skipped_rows'] = skipped_rows
-                result['message'] = f'Imported {imported_count} trades, {duplicates_count} duplicates, {skipped_rows} rows skipped (empty data)'
             
             return result
             
@@ -171,7 +188,7 @@ class CSVImportService:
                 'message': f'Error processing CSV: {str(e)}'
             }
     
-    def import_robinhood_csv(self, csv_content: str, account: Account) -> Dict[str, Any]:
+    def import_robinhood_csv(self, csv_content: str, account: Account, overwrite_existing: bool = False) -> Dict[str, Any]:
         """
         Import Robinhood CSV data
         
@@ -240,7 +257,14 @@ class CSVImportService:
                     ).first()
                     
                     if existing_trade:
-                        duplicates_count += 1
+                        if overwrite_existing:
+                            # Update existing trade
+                            for key, value in trade_data.items():
+                                if key != 'account_id':  # Don't change account_id
+                                    setattr(existing_trade, key, value)
+                            imported_count += 1
+                        else:
+                            duplicates_count += 1
                         continue
                     
                     # Create new trade
@@ -261,17 +285,27 @@ class CSVImportService:
             
             db.session.commit()
             
+            # Create standardized result message for Robinhood
+            message_parts = []
+            if imported_count > 0:
+                message_parts.append(f'{imported_count} trades imported')
+            if duplicates_count > 0:
+                action = 'updated' if overwrite_existing else 'skipped'
+                message_parts.append(f'{duplicates_count} duplicates {action}')
+            if skipped_rows > 0:
+                message_parts.append(f'{skipped_rows} rows skipped')
+            if len(errors) > 0:
+                message_parts.append(f'{len(errors)} errors')
+                
             result = {
                 'success': True,
-                'imported_count': imported_count,
-                'duplicates_count': duplicates_count,
-                'errors_count': len(errors),
-                'errors': errors[:10]  # Return first 10 errors
+                'message': ', '.join(message_parts) if message_parts else 'No trades processed',
+                'total_processed': imported_count + duplicates_count + skipped_rows + len(errors),
+                'imported': imported_count,
+                'skipped': duplicates_count + skipped_rows,
+                'errors': len(errors),
+                'error_details': errors[:10]  # Return first 10 errors
             }
-            
-            if skipped_rows > 0:
-                result['skipped_rows'] = skipped_rows
-                result['message'] = f'Imported {imported_count} trades, {duplicates_count} duplicates, {skipped_rows} rows skipped (empty data)'
             
             return result
             
@@ -292,9 +326,7 @@ class CSVImportService:
         
         # Parse instrument and description
         symbol = str(row['Symbol']).strip().upper()
-        if symbol == "-AMAT250516P140":
-            import ipdb; ipdb.set_trace()
-            
+        
         description = str(row['Description']).strip()
         action = str(row['Action']).strip().upper()
         position_type = str(row['Type']).strip()  # Cash, Margin, etc.

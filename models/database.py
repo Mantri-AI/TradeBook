@@ -319,6 +319,65 @@ class OptionData(db.Model):
         return f'<OptionData {self.symbol} {self.option_type} ${self.strike_price} exp:{self.expiration_date}>'
 
 
+class ImportHistory(db.Model):
+    """Track CSV import history for accounts"""
+    __tablename__ = 'import_history'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('accounts.id'), nullable=False)
+    
+    # Import details
+    filename = db.Column(db.String(255), nullable=False)
+    file_size = db.Column(db.Integer)  # File size in bytes
+    import_type = db.Column(db.String(20), default='trades')  # trades, positions, etc.
+    
+    # Import results
+    records_processed = db.Column(db.Integer, default=0)
+    records_imported = db.Column(db.Integer, default=0)
+    records_skipped = db.Column(db.Integer, default=0)
+    records_errors = db.Column(db.Integer, default=0)
+    
+    # Import status and metadata
+    status = db.Column(db.String(20), default='completed')  # processing, completed, failed
+    error_message = db.Column(db.Text)
+    import_notes = db.Column(db.Text)
+    
+    # Timestamps
+    started_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    completed_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Relationship
+    account = db.relationship('Account', backref='import_history')
+    
+    __table_args__ = (
+        Index('idx_account_import_date', 'account_id', 'started_at'),
+    )
+    
+    def __repr__(self):
+        return f'<ImportHistory {self.filename} - {self.status}>'
+    
+    def to_dict(self):
+        """Convert to dictionary for JSON serialization"""
+        return {
+            'id': self.id,
+            'account_id': self.account_id,
+            'account_name': self.account.name if self.account else None,
+            'filename': self.filename,
+            'file_size': self.file_size,
+            'import_type': self.import_type,
+            'records_processed': self.records_processed,
+            'records_imported': self.records_imported,
+            'records_skipped': self.records_skipped,
+            'records_errors': self.records_errors,
+            'status': self.status,
+            'error_message': self.error_message,
+            'import_notes': self.import_notes,
+            'started_at': self.started_at.isoformat(),
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None
+        }
+
+
 class TradingSession(db.Model):
     """Trading session tracking for analytics"""
     __tablename__ = 'trading_sessions'

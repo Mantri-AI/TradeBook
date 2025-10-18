@@ -13,6 +13,9 @@
             <button type="button" class="btn btn-sm btn-outline-secondary" onclick="refreshTrades()">
                 <i class="fas fa-sync-alt me-1"></i>Refresh
             </button>
+            <button type="button" class="btn btn-sm btn-success" onclick="showImportTradesModal()">
+                <i class="fas fa-file-import me-1"></i>Import
+            </button>
             <button type="button" class="btn btn-sm btn-outline-secondary" onclick="exportTrades()">
                 <i class="fas fa-download me-1"></i>Export
             </button>
@@ -511,6 +514,74 @@
                     <i class="fas fa-save me-1"></i>Save Trade
                 </button>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Import Trades Modal -->
+<div class="modal fade" id="importTradesModal" tabindex="-1" aria-labelledby="importTradesModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="importTradesModalLabel">
+                    <i class="fas fa-file-import me-2"></i>Import Trades from CSV
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="importTradesForm">
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Import Trading Data:</strong> Upload a CSV file containing trading transactions. The data will be imported into the selected account.
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="importAccountSelect" class="form-label">Select Account *</label>
+                        <select class="form-select" id="importAccountSelect" name="account_id" required>
+                            <option value="">Choose an account...</option>
+                        </select>
+                        <div class="form-text">Select the account where trades will be imported</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="importCsvFile" class="form-label">CSV File *</label>
+                        <input type="file" class="form-control" id="importCsvFile" name="csv_file" accept=".csv" required onchange="previewImportCSV()">
+                        <div class="form-text">
+                            Supported formats: Robinhood exports, standard trading data with columns for symbol, quantity, price, date.
+                            <br><small class="text-muted">Max file size: 10MB</small>
+                        </div>
+                    </div>
+                    
+                    <div id="importCsvPreview" style="display: none;">
+                        <div class="alert alert-secondary">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span><i class="fas fa-table me-2"></i>Data Preview</span>
+                                <span class="badge bg-info" id="importCsvRowCount">0 rows detected</span>
+                            </div>
+                            <div id="importCsvPreviewContent"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="overwriteExisting" name="overwrite_existing">
+                        <label class="form-check-label" for="overwriteExisting">
+                            Overwrite existing trades
+                        </label>
+                        <div class="form-text">If checked, duplicate trades will be replaced. If unchecked, duplicates will be skipped.</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="importNotes" class="form-label">Import Notes (Optional)</label>
+                        <textarea class="form-control" id="importNotes" name="notes" rows="2" placeholder="Add any notes about this import..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success" id="importTradesBtn" disabled>
+                        <i class="fas fa-file-import me-2"></i>Import Trades
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
@@ -1301,5 +1372,152 @@
             showError('Network error occurred');
         });
     }
+
+    // Import Trades Functions
+    function showImportTradesModal() {
+        // Load accounts into dropdown
+        fetch('/api/accounts')
+            .then(response => response.json())
+            .then(accounts => {
+                const accountSelect = $('#importAccountSelect');
+                accountSelect.find('option:not(:first)').remove(); // Keep first "Choose an account..." option
+                
+                accounts.forEach(account => {
+                    if (account.is_active) {
+                        accountSelect.append(`<option value="${account.id}">${account.name} (${account.provider})</option>`);
+                    }
+                });
+            })
+            .catch(error => {
+                console.error('Error loading accounts:', error);
+                showError('Failed to load accounts');
+            });
+        
+        // Reset form
+        $('#importTradesForm')[0].reset();
+        $('#importCsvPreview').hide();
+        $('#importTradesBtn').prop('disabled', true);
+        
+        // Show modal
+        const importModal = new bootstrap.Modal(document.getElementById('importTradesModal'));
+        importModal.show();
+    }
+
+    function previewImportCSV() {
+        const fileInput = $('#importCsvFile')[0];
+        const file = fileInput.files[0];
+        
+        if (file) {
+            if (file.size > 10 * 1024 * 1024) { // 10MB limit
+                showError('File size too large. Please select a file under 10MB.');
+                fileInput.value = '';
+                return;
+            }
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const csvContent = e.target.result;
+                const lines = csvContent.split('\n').filter(line => line.trim());
+                
+                if (lines.length > 0) {
+                    // Show first few rows as preview
+                    const previewLines = lines.slice(0, Math.min(6, lines.length));
+                    let previewHtml = '<div class="table-responsive"><table class="table table-sm table-bordered"><tbody>';
+                    
+                    previewLines.forEach((line, index) => {
+                        const cells = line.split(',').map(cell => cell.trim().replace(/"/g, ''));
+                        previewHtml += '<tr>';
+                        cells.forEach(cell => {
+                            const cellClass = index === 0 ? 'fw-bold bg-light' : '';
+                            previewHtml += `<td class="${cellClass}">${cell}</td>`;
+                        });
+                        previewHtml += '</tr>';
+                    });
+                    
+                    previewHtml += '</tbody></table></div>';
+                    
+                    $('#importCsvPreviewContent').html(previewHtml);
+                    $('#importCsvRowCount').text(`${lines.length - 1} rows detected`);
+                    $('#importCsvPreview').show();
+                    
+                    // Enable import button if account is also selected
+                    if ($('#importAccountSelect').val()) {
+                        $('#importTradesBtn').prop('disabled', false);
+                    }
+                } else {
+                    showError('CSV file appears to be empty');
+                    fileInput.value = '';
+                }
+            };
+            reader.readAsText(file);
+        } else {
+            $('#importCsvPreview').hide();
+            $('#importTradesBtn').prop('disabled', true);
+        }
+    }
+
+    // Enable import button when both account and file are selected
+    $('#importAccountSelect').on('change', function() {
+        const accountSelected = $(this).val();
+        const fileSelected = $('#importCsvFile')[0].files.length > 0;
+        $('#importTradesBtn').prop('disabled', !(accountSelected && fileSelected));
+    });
+
+    // Handle import form submission
+    $('#importTradesForm').on('submit', function(e) {
+        e.preventDefault();
+        
+        const fileInput = $('#importCsvFile')[0];
+        const file = fileInput.files[0];
+        const accountId = $('#importAccountSelect').val();
+        
+        if (!file || !accountId) {
+            showError('Please select both an account and a CSV file');
+            return;
+        }
+        
+        const formData = new FormData();
+        formData.append('csv_file', file);
+        formData.append('overwrite_existing', $('#overwriteExisting').is(':checked'));
+        formData.append('import_notes', $('#importNotes').val());
+        
+        // Show loading
+        showLoading();
+        const importBtn = $('#importTradesBtn');
+        importBtn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-2"></i>Importing...');
+        
+        fetch(`/api/accounts/${accountId}/import-csv`, {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(result => {
+            hideLoading();
+            importBtn.prop('disabled', false).html('<i class="fas fa-file-import me-2"></i>Import Trades');
+            
+            if (result.success) {
+                showSuccess(result.message);
+                $('#importTradesModal').modal('hide');
+                
+                // Refresh the page to show imported data
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showError(result.message || 'Import failed');
+            }
+        })
+        .catch(error => {
+            hideLoading();
+            importBtn.prop('disabled', false).html('<i class="fas fa-file-import me-2"></i>Import Trades');
+            console.error('Error importing trades:', error);
+            showError('Network error occurred during import');
+        });
+    });
+
+    // Reset import form when modal is closed
+    $('#importTradesModal').on('hidden.bs.modal', function() {
+        $('#importTradesForm')[0].reset();
+        $('#importCsvPreview').hide();
+        $('#importTradesBtn').prop('disabled', true).html('<i class="fas fa-file-import me-2"></i>Import Trades');
+    });
 </script>
 {% endblock %}

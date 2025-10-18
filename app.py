@@ -24,7 +24,7 @@ from models.database import db
 db.init_app(app)
 
 # Import models and services after db initialization
-from models.database import Account, Position, Trade, StockData, OptionData
+from models.database import Account, Position, Trade, StockData, OptionData, ImportHistory
 from services.robinhood_service import RobinhoodService
 from services.data_analyzer import DataAnalyzer
 from services.csv_import_service import CSVImportService
@@ -276,19 +276,46 @@ def api_account_details(account_id):
     """Get detailed account information"""
     account = Account.query.get_or_404(account_id)
     
-    # Get recent positions and trades
+    # Get recent positions, trades and import history
     recent_positions = Position.query.filter_by(account_id=account_id).limit(5).all()
     recent_trades = Trade.query.filter_by(account_id=account_id).order_by(Trade.executed_at.desc()).limit(5).all()
+    import_history = ImportHistory.query.filter_by(account_id=account_id).order_by(ImportHistory.started_at.desc()).limit(10).all()
     
     return jsonify({
         'account': account.to_dict(),
         'recent_positions': [pos.to_dict() for pos in recent_positions],
         'recent_trades': [trade.to_dict() for trade in recent_trades],
+        'import_history': [import_rec.to_dict() for import_rec in import_history],
         'summary': {
             'total_positions': Position.query.filter_by(account_id=account_id).count(),
             'total_trades': Trade.query.filter_by(account_id=account_id).count(),
             'portfolio_value': account.total_portfolio_value or 0,
-            'buying_power': account.buying_power or 0
+            'buying_power': account.buying_power or 0,
+            'total_imports': ImportHistory.query.filter_by(account_id=account_id).count()
+        }
+    })
+
+@app.route('/api/accounts/<int:account_id>/import-history')
+def api_account_import_history(account_id):
+    """Get import history for a specific account"""
+    account = Account.query.get_or_404(account_id)
+    
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
+    
+    imports = ImportHistory.query.filter_by(account_id=account_id)\
+        .order_by(ImportHistory.started_at.desc())\
+        .paginate(page=page, per_page=per_page, error_out=False)
+    
+    return jsonify({
+        'imports': [import_rec.to_dict() for import_rec in imports.items],
+        'pagination': {
+            'page': imports.page,
+            'pages': imports.pages,
+            'per_page': imports.per_page,
+            'total': imports.total,
+            'has_next': imports.has_next,
+            'has_prev': imports.has_prev
         }
     })
 
@@ -344,6 +371,7 @@ def api_import_csv():
 @app.route('/api/accounts/<int:account_id>/import-csv', methods=['POST'])
 def api_import_csv_to_account(account_id):
     """Import CSV data to existing account"""
+    import_record = None
     try:
         account = Account.query.get_or_404(account_id)
         
@@ -355,22 +383,71 @@ def api_import_csv_to_account(account_id):
         if not csv_file.filename:
             return jsonify({'success': False, 'message': 'No file selected'}), 400
         
+        # Get additional form data
+        overwrite_existing = request.form.get('overwrite_existing', 'false').lower() == 'true'
+        import_notes = request.form.get('import_notes', '').strip()
+        
+        # Create import history record
+        import_record = ImportHistory(
+            account_id=account_id,
+            filename=csv_file.filename,
+            file_size=len(csv_file.read()),
+            import_type='trades',
+            status='processing',
+            import_notes=import_notes
+        )
+        
+        # Reset file pointer after reading size
+        csv_file.seek(0)
+        
         # Read CSV content
         csv_content = csv_file.read().decode('utf-8')
+        
+        # Save import record to database
+        db.session.add(import_record)
+        db.session.commit()
         
         # Import based on provider
         csv_service = CSVImportService()
         
         if account.provider == 'robinhood':
-            result = csv_service.import_robinhood_csv(csv_content, account)
+            result = csv_service.import_robinhood_csv(csv_content, account, overwrite_existing)
         elif account.provider == 'fidelity':
-            result = csv_service.import_fidelity_csv(csv_content, account)
+            result = csv_service.import_fidelity_csv(csv_content, account, overwrite_existing)
         else:
+            import_record.status = 'failed'
+            import_record.error_message = f'CSV import for {account.provider} not yet supported'
+            import_record.completed_at = datetime.utcnow()
+            db.session.commit()
             return jsonify({'success': False, 'message': f'CSV import for {account.provider} not yet supported'}), 400
+        
+        # Update import record with results
+        import_record.records_processed = result.get('total_processed', 0)
+        import_record.records_imported = result.get('imported', 0)
+        import_record.records_skipped = result.get('skipped', 0)
+        import_record.records_errors = result.get('errors', 0)
+        import_record.status = 'completed' if result.get('success') else 'failed'
+        import_record.error_message = result.get('message') if not result.get('success') else None
+        import_record.completed_at = datetime.utcnow()
+        
+        db.session.commit()
+        
+        # Add import history ID to result
+        result['import_id'] = import_record.id
         
         return jsonify(result)
         
     except Exception as e:
+        # Update import record with error if it exists
+        if import_record:
+            import_record.status = 'failed'
+            import_record.error_message = str(e)
+            import_record.completed_at = datetime.utcnow()
+            try:
+                db.session.commit()
+            except:
+                pass
+                
         logger.error(f"Error in CSV import: {str(e)}")
         return jsonify({'success': False, 'message': f'Import error: {str(e)}'}), 500
 
