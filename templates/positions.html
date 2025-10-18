@@ -37,14 +37,11 @@
         <div class="col-md-4">
             <label for="symbolFilter" class="form-label">Symbol(s)</label>
             <div class="input-group">
-                <select class="form-select" id="symbolDropdown" onchange="selectSymbolFromDropdown()" style="display: none;">
-                    <option value="">Select Symbol</option>
+                <input type="text" class="form-control" id="symbolInput" placeholder="Enter symbols (comma separated)" onchange="applyFilters()" />
+                <select class="form-select" id="symbolDropdown" onchange="selectSymbolFromDropdown()" style="max-width: 100px;">
+                    <option value="">Select</option>
                     <!-- Options will be populated by JavaScript -->
                 </select>
-                <input type="text" class="form-control" id="symbolInput" placeholder="Enter symbols (comma separated) or use dropdown" onchange="applyFilters()" />
-                <button class="btn btn-outline-secondary" type="button" id="symbolToggleBtn" onclick="toggleSymbolInput()">
-                    <i class="fas fa-chevron-down"></i>
-                </button>
             </div>
         </div>
         <div class="col-md-2">
@@ -392,9 +389,7 @@
         font-size: 0.9rem;
     }
 
-    .symbol-toggle-btn {
-        min-width: 40px;
-    }
+
 </style>
 {% endblock %}
 
@@ -403,7 +398,7 @@
     let currentView = 'table';
     let sortDirection = {};
     let filterData = {};
-    let symbolInputMode = true; // true for input, false for dropdown
+
 
     $(document).ready(function() {
         // Initialize view
@@ -466,30 +461,24 @@
         }
     }
 
-    function toggleSymbolInput() {
-        const symbolInput = $('#symbolInput');
-        const symbolDropdown = $('#symbolDropdown');
-        const toggleBtn = $('#symbolToggleBtn');
-
-        if (symbolInputMode) {
-            // Switch to dropdown mode
-            symbolInput.hide();
-            symbolDropdown.show();
-            toggleBtn.html('<i class="fas fa-keyboard"></i>');
-            symbolInputMode = false;
-        } else {
-            // Switch to input mode
-            symbolDropdown.hide();
-            symbolInput.show().focus();
-            toggleBtn.html('<i class="fas fa-chevron-down"></i>');
-            symbolInputMode = true;
-        }
-    }
-
     function selectSymbolFromDropdown() {
         const selectedSymbol = $('#symbolDropdown').val();
         if (selectedSymbol) {
-            $('#symbolInput').val(selectedSymbol);
+            // Overwrite the text field with selected symbol
+            const currentSymbols = $('#symbolInput').val().trim();
+            if (currentSymbols) {
+                // If there are existing symbols, append the new one
+                const symbolList = currentSymbols.split(',').map(s => s.trim()).filter(s => s);
+                if (!symbolList.includes(selectedSymbol)) {
+                    symbolList.push(selectedSymbol);
+                }
+                $('#symbolInput').val(symbolList.join(', '));
+            } else {
+                // If no existing symbols, just set the selected one
+                $('#symbolInput').val(selectedSymbol);
+            }
+            // Reset dropdown to default
+            $('#symbolDropdown').val('');
             applyFilters();
         }
     }
@@ -499,17 +488,10 @@
         const type = $('#typeFilter').val();
         let symbols = [];
         
-        // Get symbols from input or dropdown
-        if (symbolInputMode) {
-            const symbolText = $('#symbolInput').val().trim();
-            if (symbolText) {
-                symbols = symbolText.split(',').map(s => s.trim().toUpperCase()).filter(s => s);
-            }
-        } else {
-            const dropdownSymbol = $('#symbolDropdown').val();
-            if (dropdownSymbol) {
-                symbols = [dropdownSymbol];
-            }
+        // Get symbols from input field
+        const symbolText = $('#symbolInput').val().trim();
+        if (symbolText) {
+            symbols = symbolText.split(',').map(s => s.trim().toUpperCase()).filter(s => s);
         }
 
         filterPositions(accountId, type, symbols);
